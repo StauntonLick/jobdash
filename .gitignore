@@ -1,0 +1,13 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Node / Next
+node_modules/
+dashboard/node_modules/
+dashboard/.next/
+dashboard/.cache/
+
+# OS
+.DS_Store
