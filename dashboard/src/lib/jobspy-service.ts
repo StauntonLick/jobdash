@@ -15,9 +15,11 @@ export type SearchResult = {
 };
 
 const CACHE_DIR = path.resolve(process.cwd(), ".cache", "searches");
-const PYTHON_PATH = path.resolve(process.cwd(), "../venv/bin/python");
 const SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "run_jobspy_search.py");
 const CACHE_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+const PYTHON_PATH_CANDIDATES = [path.resolve(process.cwd(), "../venv/bin/python")];
+
+let resolvedPythonPath: string | null = null;
 
 const INDUSTRY_RULES: Array<{ label: string; keywords: string[] }> = [
   { label: "AI", keywords: ["artificial intelligence", "machine learning", "llm", "large language model", "generative ai", "prompt engineering", "neural network"] },
@@ -39,6 +41,26 @@ const INDUSTRY_RULES: Array<{ label: string; keywords: string[] }> = [
 
 async function ensureCacheDir(): Promise<void> {
   await fs.mkdir(CACHE_DIR, { recursive: true });
+}
+
+async function resolvePythonPath(): Promise<string> {
+  if (resolvedPythonPath) {
+    return resolvedPythonPath;
+  }
+
+  for (const candidate of PYTHON_PATH_CANDIDATES) {
+    try {
+      await fs.access(candidate);
+      resolvedPythonPath = candidate;
+      return candidate;
+    } catch {
+      continue;
+    }
+  }
+
+  throw new Error(
+    `Unable to find a Python interpreter for JobDash. Checked: ${PYTHON_PATH_CANDIDATES.join(", ")}`
+  );
 }
 
 function getCachePath(slug: string): string {
@@ -221,8 +243,10 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
   results: Array<Record<string, unknown>>;
   count: number;
 }> {
+  const pythonPath = await resolvePythonPath();
+
   return new Promise((resolve, reject) => {
-    const child = spawn(PYTHON_PATH, [SCRIPT_PATH], {
+    const child = spawn(pythonPath, [SCRIPT_PATH], {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
