@@ -172,18 +172,19 @@ function JobTitleCell({
   const extraLinks = labelledLinks.slice(1);
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex w-full min-w-0 items-center gap-2">
       {primaryLink ? (
         <a
           href={primaryLink.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="underline hover:opacity-80"
+          className="truncate underline hover:opacity-80"
+          title={title}
         >
           {title}
         </a>
       ) : (
-        <span>{title}</span>
+        <span className="truncate" title={title}>{title}</span>
       )}
 
       {extraLinks.length > 0 && (
@@ -344,7 +345,10 @@ export default function Home() {
                         <TableHeader>
                           <TableRow>
                             {VISIBLE_COLUMNS.map((column) => (
-                              <TableHead key={column} className="capitalize">
+                              <TableHead
+                                key={column}
+                                className={column === "title" ? "w-[250px] max-w-[250px] capitalize" : "capitalize"}
+                              >
                                 {column === "date_posted"
                                   ? "Age"
                                   : column === "industry"
@@ -377,7 +381,10 @@ export default function Home() {
                               .map((row, index) => (
                                 <TableRow key={`${search.slug}-${index}`}>
                                   {VISIBLE_COLUMNS.map((column) => (
-                                    <TableCell key={`${search.slug}-${index}-${column}`}>
+                                    <TableCell
+                                      key={`${search.slug}-${index}-${column}`}
+                                      className={column === "title" ? "w-[250px] max-w-[250px]" : undefined}
+                                    >
                                       {column === "title" ? (
                                         <JobTitleCell
                                           title={String(row["title"] ?? "")}
