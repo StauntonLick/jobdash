@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link2, RotateCw } from "lucide-react";
+import { ChevronDown, Link2, RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,6 +21,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { INDUSTRY_LABELS } from "@/lib/industry-labels";
 
 type SearchData = {
   slug: string;
@@ -32,13 +33,38 @@ type SearchData = {
   error?: string;
 };
 
-const VISIBLE_COLUMNS = ["title", "company", "location", "industry", "salary", "date_posted"] as const;
+const STATUS_OPTIONS = ["New", "Skipped", "Applied", "Shortlist"] as const;
+type JobStatus = (typeof STATUS_OPTIONS)[number];
+
+const VISIBLE_COLUMNS = ["title", "company", "location", "industry", "salary", "date_posted", "status"] as const;
 
 type JobLink = {
   site: string;
   url: string;
   location?: string;
 };
+
+function toJobStatus(value: unknown): JobStatus {
+  const normalized = String(value ?? "").trim();
+  if (STATUS_OPTIONS.includes(normalized as JobStatus)) {
+    return normalized as JobStatus;
+  }
+
+  return "New";
+}
+
+function statusTextColor(status: JobStatus): { color: string } {
+  switch (status) {
+    case "Skipped":
+      return { color: "#8F93A6" };
+    case "Applied":
+      return { color: "#29E061" };
+    case "Shortlist":
+      return { color: "#FFBF00" };
+    default:
+      return { color: "#FFF" };
+  }
+}
 
 function toDisplayValue(value: unknown): string {
   if (Array.isArray(value)) {
@@ -210,6 +236,66 @@ function JobTitleCell({
   );
 }
 
+function JobStatusCell({
+  status,
+  onChange,
+}: {
+  status: JobStatus;
+  onChange: (status: JobStatus) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="group inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+        style={statusTextColor(status)}
+      >
+        {status}
+        <ChevronDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36">
+        {STATUS_OPTIONS.map((option) => (
+          <DropdownMenuItem key={option} onClick={() => onChange(option)}>
+            {option}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function IndustryCell({
+  industry,
+  onChange,
+}: {
+  industry: string;
+  onChange: (industry: string | null) => void;
+}) {
+  const displayText = industry || "-";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="group inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+      >
+        {displayText}
+        <ChevronDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-max">
+        {[...INDUSTRY_LABELS].sort().map((option) => (
+          <DropdownMenuItem
+            key={option}
+            onClick={() => onChange(option)}
+            disabled={industry === option}
+          >
+            {option}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+
 export default function Home() {
   const [searches, setSearches] = useState<SearchData[]>([]);
   const [activeTab, setActiveTab] = useState<string>("");
@@ -258,6 +344,15 @@ export default function Home() {
     [activeTab, searches]
   );
 
+  const resolvedActiveTab = useMemo(() => {
+    if (searches.length === 0) {
+      return "";
+    }
+
+    const hasActive = searches.some((item) => item.slug === activeTab);
+    return hasActive ? activeTab : searches[0].slug;
+  }, [activeTab, searches]);
+
   const globalLastUpdated = useMemo(() => {
     if (searches.length === 0) {
       return null;
@@ -284,6 +379,78 @@ export default function Home() {
       setError(String(err));
     } finally {
       setRefreshingAll(false);
+    }
+  };
+
+  const updateJobStatus = async (statusKey: string, status: JobStatus) => {
+    try {
+      const response = await fetch("/api/job-statuses", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ statusKey, status }),
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to update job status");
+      }
+
+      setSearches((current) =>
+        current.map((search) => ({
+          ...search,
+          results: search.results.map((row) => {
+            const rowKey = String(row["status_key"] ?? "").trim().toLowerCase();
+            if (rowKey !== statusKey) {
+              return row;
+            }
+
+            return {
+              ...row,
+              job_status: status,
+            };
+          }),
+        }))
+      );
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const updateJobIndustry = async (statusKey: string, industry: string | null) => {
+    try {
+      const response = await fetch("/api/job-industries", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ statusKey, industry }),
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to update job industry");
+      }
+
+      setSearches((current) =>
+        current.map((search) => ({
+          ...search,
+          results: search.results.map((row) => {
+            const rowKey = String(row["status_key"] ?? "").trim().toLowerCase();
+            if (rowKey !== statusKey) {
+              return row;
+            }
+
+            return {
+              ...row,
+              industry_label: industry,
+            };
+          }),
+        }))
+      );
+    } catch (err) {
+      setError(String(err));
     }
   };
 
@@ -322,7 +489,7 @@ export default function Home() {
 
         <Card>
           <CardContent className="space-y-4">
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <Tabs value={resolvedActiveTab} onValueChange={setActiveTab}>
               <ScrollArea className="w-full whitespace-nowrap">
                 <TabsList className="h-auto min-w-full justify-start bg-transparent">
                   {searches.map((search) => (
@@ -355,7 +522,9 @@ export default function Home() {
                                   ? "Industry"
                                   : column === "salary"
                                   ? "Salary"
-                                  : column.replaceAll("_", " ")}
+                                  : column === "status"
+                                  ? "Status"
+                                  : column.replace(/_/g, " ")}
                               </TableHead>
                             ))}
                           </TableRow>
@@ -399,9 +568,43 @@ export default function Home() {
                                       ) : column === "date_posted" ? (
                                         formatAge(row[column])
                                       ) : column === "industry" ? (
-                                        toDisplayValue(row["industry_label"])
+                                        <IndustryCell
+                                          industry={String(row["industry_label"] ?? "")}
+                                          onChange={(nextIndustry) => {
+                                            const statusKey = String(
+                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
+                                            )
+                                              .trim()
+                                              .toLowerCase();
+
+                                            if (!statusKey) {
+                                              setError("Unable to update industry for this row.");
+                                              return;
+                                            }
+
+                                            void updateJobIndustry(statusKey, nextIndustry);
+                                          }}
+                                        />
                                       ) : column === "salary" ? (
                                         formatSalary(row)
+                                      ) : column === "status" ? (
+                                        <JobStatusCell
+                                          status={toJobStatus(row["job_status"])}
+                                          onChange={(nextStatus) => {
+                                            const statusKey = String(
+                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
+                                            )
+                                              .trim()
+                                              .toLowerCase();
+
+                                            if (!statusKey) {
+                                              setError("Unable to update status for this row.");
+                                              return;
+                                            }
+
+                                            void updateJobStatus(statusKey, nextStatus);
+                                          }}
+                                        />
                                       ) : (
                                         toDisplayValue(row[column])
                                       )}
@@ -421,6 +624,7 @@ export default function Home() {
         </Card>
 
         {!activeSearch ? <p className="text-sm text-slate-500">No searches available.</p> : null}
+
       </div>
     </main>
   );

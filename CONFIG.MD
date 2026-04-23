@@ -63,7 +63,7 @@
     location="United Kingdom",
     results_wanted=30,
     hours_old=168,
-    country_indeed="Remote",
+    country_indeed="UK",
     is_remote=True
 
 ## FILTERS
@@ -85,3 +85,5 @@ Exclude jobs where the title includes any of the following:
 - Graphic
 - Product Manager
 - Product Owner
+- Management
+- Marketing

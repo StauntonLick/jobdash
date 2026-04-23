@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 
 import type { SearchDefinition, SearchFilters } from "@/lib/search-config";
+import { INDUSTRY_LABELS } from "@/lib/industry-labels";
 
 export type SearchResult = {
   slug: string;
@@ -15,11 +16,24 @@ export type SearchResult = {
 };
 
 const CACHE_DIR = path.resolve(process.cwd(), ".cache", "searches");
+const STATUS_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-statuses.json");
+const INDUSTRY_OVERRIDE_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-industry-overrides.json");
 const SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "run_jobspy_search.py");
 const CACHE_MAX_AGE_MS = 4 * 60 * 60 * 1000;
-const PYTHON_PATH_CANDIDATES = [path.resolve(process.cwd(), "../venv/bin/python")];
+const PYTHON_PATH_CANDIDATES = [
+  process.env.JOBDASH_PYTHON,
+  path.resolve(process.cwd(), "../venv/bin/python"),
+  path.resolve(process.cwd(), "../.venv/bin/python"),
+  path.resolve(process.cwd(), "venv/bin/python"),
+  path.resolve(process.cwd(), ".venv/bin/python"),
+  "python3",
+  "python",
+].filter((value): value is string => Boolean(value && value.trim()));
 
 let resolvedPythonPath: string | null = null;
+
+export const JOB_STATUS_VALUES = ["New", "Skipped", "Applied", "Shortlist"] as const;
+export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
 
 const INDUSTRY_RULES: Array<{ label: string; keywords: string[] }> = [
   { label: "AI", keywords: ["artificial intelligence", "machine learning", "llm", "large language model", "generative ai", "prompt engineering", "neural network"] },
@@ -28,19 +42,164 @@ const INDUSTRY_RULES: Array<{ label: string; keywords: string[] }> = [
   { label: "Government", keywords: ["civil service", "government", "public sector", "regulatory agency", "ministry", "council"] },
   { label: "Healthcare", keywords: ["healthcare", "hospital", "patient", "medical", "clinical", "pharma", "medicine"] },
   { label: "Finance", keywords: ["bank", "banking", "financial", "insurance", "retirement", "wealth", "pension"] },
-  { label: "Travel", keywords: ["travel", "travelling","airline", "loyalty", "holiday", "aviation", "destination"] },
+  { label: "Travel", keywords: ["travel", "travelling","airline", "loyalty", "holiday", "aviation", "destination","transport","bus","train"] },
   { label: "Retail", keywords: ["retail", "e-commerce", "ecommerce", "shopper", "merchandise", "consumer goods"] },
   { label: "Logistics", keywords: ["logistics", "fulfilment", "fulfillment", "delivery", "shipping", "supply chain"] },
   { label: "Education", keywords: ["education", "university", "student", "learning", "school", "academic"] },
-  { label: "Consulting", keywords: ["consulting", "consultancy", "advisory", "client engagements", "professional services"] },
+  { label: "Consulting", keywords: ["consulting", "consultancy", "advisory","clients","client","client engagements", "professional services","agency"] },
   { label: "Media", keywords: ["media", "publishing", "journalism", "newsroom", "editorial", "broadcast"] },
   { label: "Telecom", keywords: ["telecom", "telecommunications", "mobile network", "broadband", "connectivity"] },
   { label: "Energy", keywords: ["energy", "utilities", "power grid", "renewable", "electricity", "oil and gas"] },
   { label: "Tech", keywords: ["software", "saas", "platform", "developer tools", "cloud", "technology", "product engineering"] },
 ];
 
+export { INDUSTRY_LABELS };
+
+const INDUSTRY_SCORE_WEIGHTS = {
+  companyIndustry: 6,
+  companyDescription: 4,
+  title: 3,
+  description: 1,
+} as const;
+
+const MIN_INDUSTRY_SCORE = 3;
+const MIN_INDUSTRY_MARGIN = 2;
+
+const BENEFITS_SECTION_HINTS = [
+  "benefits",
+  "perks",
+  "what we offer",
+  "compensation",
+  "health insurance",
+  "private healthcare",
+  "medical insurance",
+  "pension",
+  "retirement plan",
+  "wellness",
+];
+
 async function ensureCacheDir(): Promise<void> {
   await fs.mkdir(CACHE_DIR, { recursive: true });
+}
+
+function isJobStatus(value: unknown): value is JobStatus {
+  return JOB_STATUS_VALUES.includes(value as JobStatus);
+}
+
+function buildStatusKey(row: Record<string, unknown>): string {
+  return `${normalizeText(row.title)}::${normalizeText(row.company)}`;
+}
+
+async function readStatusStore(): Promise<Record<string, JobStatus>> {
+  try {
+    const content = await fs.readFile(STATUS_STORE_PATH, "utf8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+
+    const normalized: Record<string, JobStatus> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (isJobStatus(value)) {
+        normalized[key] = value;
+      }
+    }
+
+    return normalized;
+  } catch {
+    return {};
+  }
+}
+
+async function writeStatusStore(statuses: Record<string, JobStatus>): Promise<void> {
+  await ensureCacheDir();
+  await fs.writeFile(STATUS_STORE_PATH, JSON.stringify(statuses, null, 2), "utf8");
+}
+
+export async function saveJobStatus(statusKey: string, status: JobStatus): Promise<void> {
+  const normalizedKey = normalizeText(statusKey);
+  if (!normalizedKey || !isJobStatus(status)) {
+    throw new Error("Invalid status payload.");
+  }
+
+  const currentStatuses = await readStatusStore();
+  currentStatuses[normalizedKey] = status;
+  await writeStatusStore(currentStatuses);
+}
+
+function isValidIndustryLabel(value: unknown): value is string {
+  const normalized = String(value ?? "").trim();
+  return INDUSTRY_LABELS.includes(normalized as typeof INDUSTRY_LABELS[number]);
+}
+
+async function readIndustryOverrideStore(): Promise<Record<string, string>> {
+  try {
+    const content = await fs.readFile(INDUSTRY_OVERRIDE_STORE_PATH, "utf8");
+    return JSON.parse(content) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeIndustryOverrideStore(overrides: Record<string, string>): Promise<void> {
+  await ensureCacheDir();
+  await fs.writeFile(INDUSTRY_OVERRIDE_STORE_PATH, JSON.stringify(overrides, null, 2), "utf8");
+}
+
+export async function saveIndustryOverride(statusKey: string, industry: string | null): Promise<void> {
+  const normalizedKey = normalizeText(statusKey);
+  if (!normalizedKey) {
+    throw new Error("Invalid status key.");
+  }
+
+  if (industry !== null && !isValidIndustryLabel(industry)) {
+    throw new Error("Invalid industry label.");
+  }
+
+  const currentOverrides = await readIndustryOverrideStore();
+  
+  if (industry === null) {
+    delete currentOverrides[normalizedKey];
+  } else {
+    currentOverrides[normalizedKey] = industry;
+  }
+  
+  await writeIndustryOverrideStore(currentOverrides);
+}
+
+async function canAccessPath(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function hasRequiredPythonDeps(pythonExecutable: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const child = spawn(
+      pythonExecutable,
+      ["-c", "import jobspy; import pandas"],
+      { stdio: "ignore" }
+    );
+
+    child.on("error", () => resolve(false));
+    child.on("close", (code) => resolve(code === 0));
+  });
+}
+
+function uniqueValues(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    unique.push(normalized);
+  }
+
+  return unique;
 }
 
 async function resolvePythonPath(): Promise<string> {
@@ -48,18 +207,34 @@ async function resolvePythonPath(): Promise<string> {
     return resolvedPythonPath;
   }
 
-  for (const candidate of PYTHON_PATH_CANDIDATES) {
-    try {
-      await fs.access(candidate);
-      resolvedPythonPath = candidate;
-      return candidate;
-    } catch {
+  const checkedCandidates: string[] = [];
+
+  for (const candidate of uniqueValues(PYTHON_PATH_CANDIDATES)) {
+    if (path.isAbsolute(candidate)) {
+      const exists = await canAccessPath(candidate);
+      if (!exists) {
+        continue;
+      }
+    }
+
+    checkedCandidates.push(candidate);
+
+    const hasDeps = await hasRequiredPythonDeps(candidate);
+    if (!hasDeps) {
       continue;
     }
+
+    resolvedPythonPath = candidate;
+    return candidate;
   }
 
   throw new Error(
-    `Unable to find a Python interpreter for JobDash. Checked: ${PYTHON_PATH_CANDIDATES.join(", ")}`
+    [
+      "Unable to find a working Python interpreter for JobDash.",
+      `Checked: ${checkedCandidates.join(", ") || "(none)"}`,
+      "Expected packages: python-jobspy, pandas.",
+      "Run ../scripts/setup-python.sh from the dashboard folder, or set JOBDASH_PYTHON to a Python executable with those packages installed.",
+    ].join(" ")
   );
 }
 
@@ -95,6 +270,33 @@ function normalizeText(value: unknown): string {
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+function matchesWholeKeyword(haystack: string, keyword: string): boolean {
+  const normalizedKeyword = normalizeText(keyword);
+  if (!normalizedKeyword) {
+    return false;
+  }
+
+  // Split haystack into words and check for exact matches
+  // This avoids regex complexity and is more reliable
+  const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
+  
+  // For multi-word phrases, check if the haystack contains the phrase with word boundaries
+  if (normalizedKeyword.includes(" ")) {
+    // Use regex with properly escaped special chars for phrase matching
+    const escapedKeyword = normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    try {
+      const pattern = new RegExp(`(?:^|[^a-z0-9])${escapedKeyword}(?:[^a-z0-9]|$)`);
+      return pattern.test(haystack);
+    } catch {
+      // If regex fails, fall back to substring check
+      return haystack.includes(normalizedKeyword);
+    }
+  }
+  
+  // For single words, check if it's in the word list
+  return words.includes(normalizedKeyword);
 }
 
 function dedupeResults(results: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -192,50 +394,135 @@ function isRemoteResult(row: Record<string, unknown>): boolean {
   return normalized === "true" || normalized === "1" || normalized === "yes";
 }
 
-function inferIndustryLabel(row: Record<string, unknown>): string {
-  const haystack = [
-    row.description,
-    row.company_description,
-    row.company_industry,
-    row.title,
-    row.company,
-  ]
-    .map((value) => normalizeText(value))
-    .filter(Boolean)
-    .join(" \n ");
+function normalizeSearchCriteria(
+  criteria: SearchDefinition["criteria"]
+): SearchDefinition["criteria"] {
+  const normalized = { ...criteria };
+  const isRemote = shouldEnforceRemoteOnly(normalized);
 
-  if (!haystack) {
-    return "";
-  }
+  if (isRemote) {
+    const countryIndeed = String(normalized.country_indeed ?? "").trim().toLowerCase();
 
-  for (const rule of INDUSTRY_RULES) {
-    if (rule.keywords.some((keyword) => haystack.includes(keyword))) {
-      return rule.label;
+    // JobSpy expects a valid country name/code; "remote" is not accepted.
+    if (countryIndeed === "remote" || countryIndeed === "") {
+      normalized.country_indeed = "UK";
     }
   }
 
-  return "";
+  return normalized;
+}
+
+function inferIndustryLabel(row: Record<string, unknown>): string {
+  const title = normalizeText(row.title);
+  const company = normalizeText(row.company);
+  const companyIndustry = normalizeText(row.company_industry);
+  const companyDescription = normalizeText(row.company_description);
+  const descriptionRaw = String(row.description ?? "");
+
+  // Keep source line boundaries so benefits filtering only removes relevant lines.
+  const descriptionWithoutBenefits = descriptionRaw
+    .split("\n")
+    .map((line) => normalizeText(line))
+    .filter((line) =>
+      line.length > 0 &&
+      !BENEFITS_SECTION_HINTS.some((hint) => line.includes(hint))
+    )
+    .join(" \n ");
+
+  if (!title && !company && !companyIndustry && !companyDescription && !descriptionWithoutBenefits) {
+    return "";
+  }
+
+  const scoredRules = INDUSTRY_RULES.map((rule) => {
+    const titleMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(title, keyword)).length;
+    const companyMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(company, keyword)).length;
+    const companyIndustryMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(companyIndustry, keyword)).length;
+    const companyDescriptionMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(companyDescription, keyword)).length;
+    const descriptionMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(descriptionWithoutBenefits, keyword)).length;
+
+    const score =
+      titleMatches * INDUSTRY_SCORE_WEIGHTS.title +
+      companyMatches * INDUSTRY_SCORE_WEIGHTS.title +
+      companyIndustryMatches * INDUSTRY_SCORE_WEIGHTS.companyIndustry +
+      companyDescriptionMatches * INDUSTRY_SCORE_WEIGHTS.companyDescription +
+      descriptionMatches * INDUSTRY_SCORE_WEIGHTS.description;
+
+    return {
+      label: rule.label,
+      score,
+    };
+  }).sort((a, b) => b.score - a.score);
+
+  const top = scoredRules[0];
+  const second = scoredRules[1];
+
+  if (!top || top.score < MIN_INDUSTRY_SCORE) {
+    return "";
+  }
+
+  const margin = second ? top.score - second.score : top.score;
+  if (margin < MIN_INDUSTRY_MARGIN) {
+    return "";
+  }
+
+  return top.label;
 }
 
 function annotateDerivedFields(results: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
   return results.map((row) => ({
     ...row,
+    status_key: buildStatusKey(row),
     industry_label: inferIndustryLabel(row),
   }));
 }
 
-function presentSearchResult(payload: SearchResult, filters: SearchFilters): SearchResult {
+function applyStoredStatuses(
+  results: Array<Record<string, unknown>>,
+  statuses: Record<string, JobStatus>
+): Array<Record<string, unknown>> {
+  return results.map((row) => {
+    const statusKey = String(row.status_key ?? buildStatusKey(row));
+    const storedStatus = statuses[statusKey];
+
+    return {
+      ...row,
+      status_key: statusKey,
+      job_status: storedStatus ?? "New",
+    };
+  });
+}
+
+function applyStoredIndustryOverrides(
+  results: Array<Record<string, unknown>>,
+  overrides: Record<string, string>
+): Array<Record<string, unknown>> {
+  return results.map((row) => {
+    const statusKey = String(row.status_key ?? buildStatusKey(row));
+    const storedOverride = overrides[statusKey];
+
+    return {
+      ...row,
+      industry_label: storedOverride ?? row.industry_label,
+    };
+  });
+}
+
+async function presentSearchResult(payload: SearchResult, filters: SearchFilters): Promise<SearchResult> {
   const remoteFilteredResults = shouldEnforceRemoteOnly(payload.criteria)
     ? payload.results.filter((row) => isRemoteResult(row))
     : payload.results;
   const enrichedResults = annotateDerivedFields(remoteFilteredResults);
   const titleFilteredResults = applyTitleFilters(enrichedResults, filters);
   const dedupedResults = dedupeResults(titleFilteredResults);
+  const statuses = await readStatusStore();
+  const resultsWithStatus = applyStoredStatuses(dedupedResults, statuses);
+  const industryOverrides = await readIndustryOverrideStore();
+  const resultsWithIndustry = applyStoredIndustryOverrides(resultsWithStatus, industryOverrides);
 
   return {
     ...payload,
-    results: dedupedResults,
-    resultCount: dedupedResults.length,
+    results: resultsWithIndustry,
+    resultCount: resultsWithIndustry.length,
   };
 }
 
@@ -244,6 +531,7 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
   count: number;
 }> {
   const pythonPath = await resolvePythonPath();
+  const normalizedCriteria = normalizeSearchCriteria(criteria);
 
   return new Promise((resolve, reject) => {
     const child = spawn(pythonPath, [SCRIPT_PATH], {
@@ -290,7 +578,7 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
       }
     });
 
-    child.stdin.write(JSON.stringify(criteria));
+    child.stdin.write(JSON.stringify(normalizedCriteria));
     child.stdin.end();
   });
 }
@@ -305,7 +593,7 @@ export async function loadOrRunSearch(
   if (!forceRefresh) {
     cached = await readCache(definition.slug);
     if (cached && !isCacheStale(cached.lastUpdated)) {
-      return presentSearchResult(cached, filters);
+      return await presentSearchResult(cached, filters);
     }
   }
 
@@ -320,10 +608,10 @@ export async function loadOrRunSearch(
       lastUpdated: new Date().toISOString(),
     };
     await writeCache(payload);
-    return presentSearchResult(payload, filters);
+    return await presentSearchResult(payload, filters);
   } catch (error) {
     if (cached) {
-      return presentSearchResult(
+      return await presentSearchResult(
         {
         ...cached,
         error: String(error),
@@ -332,7 +620,7 @@ export async function loadOrRunSearch(
       );
     }
 
-    return presentSearchResult({
+    return await presentSearchResult({
       slug: definition.slug,
       title: definition.title,
       criteria: definition.criteria,
