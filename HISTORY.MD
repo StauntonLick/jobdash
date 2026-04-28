@@ -45,4 +45,55 @@ This file is a dated running history of project changes and key decisions discus
 - Created `HISTORY.MD` to keep a date-stamped, chronological record of project changes and key decisions for future context.
 - Decision: continue appending to this file whenever project direction, architecture, or setup behavior changes.
 
+## 2026-04-28
+
+### UK Remote — LinkedIn missing results investigation
+
+- Investigated why four specific LinkedIn jobs visible on linkedin.com were absent from the UK Remote dashboard tab:
+  - Remote Product Experience Designer (UX/UI) — 4405217234 (VITA CV)
+  - Senior Product Designer — 4404200248 (Tripadvisor)
+  - Staff Product Designer — 4297893827 (Deel)
+  - Product Designer — 4382100835 (Stravito)
+
+- Root cause analysis identified two separate problems:
+  1. **Remote-only filter dropping valid jobs**: Two jobs (4297893827, 4382100835) were returned by JobSpy but had `is_remote: false` despite being remote roles. The dashboard's `presentSearchResult` function discarded any result where `is_remote` was not truthy when the search is configured with `is_remote=True`, which is correct for Indeed but too strict for LinkedIn, which does not reliably set this field.
+  2. **Query-level LinkedIn retrieval gaps**: The remaining two jobs (4405217234, 4404200248) were never returned by JobSpy under the broad `"UX" OR "Product Designer" OR "User Researcher"` query. Controlled JobSpy scrape tests showed these are returned by narrower/different queries. This is inherent to LinkedIn's search ranking and pagination cutoffs; JobSpy scrapes search result pages rather than querying by ID.
+
+- Confirmed via direct Python JobSpy scrapes that retrieval is query-sensitive and partially non-deterministic for LinkedIn.
+
+### Changes made
+
+- **LinkedIn remote fallback heuristic** (`dashboard/src/lib/jobspy-service.ts`): Remote-only filter now accepts LinkedIn rows that have `is_remote: false` when any of the following are true:
+  - The title, location, description, job_type, or work_from_home_type contains a remote hint keyword (e.g. "remote", "uk remote", "work from home").
+  - The location field is blank (very common for LinkedIn remote postings where metadata is sparse).
+  - Decision: apply this heuristic only to LinkedIn rows; Indeed/Glassdoor continue to use the strict `is_remote` flag.
+
+- **UK Remote results_wanted increased to 100** (`CONFIG.MD`): Increased from 50 to allow more LinkedIn results per run, improving the chance of catching relevant postings.
+
+- **Optional debug stats mode** (`dashboard/src/lib/jobspy-service.ts`, API routes): API endpoints now accept `?debug=true`. When enabled, each search result includes a `debug` object with per-stage counts:
+  - `rawCount`, `remoteFilteredCount`, `titleFilteredCount`, `dedupedCount`, `finalCount`
+  - `excludedByRemoteFilter`, `excludedByTitleFilter`, `removedByDedupe`, `includedByLinkedInRemoteFallback`
+  - Decision: opt-in via query param only; normal responses are unchanged.
+
+### Combined vs split query investigation
+
+- Ran a controlled benchmark comparing combined `"UX" OR "Product Designer"` vs separate `"UX"` and `"Product Designer"` queries per site, merging and deduping split results by URL:
+  - **Glassdoor**: returned 0 results in both modes (API errors in current environment; location parsing failures for `United Kingdom` and `London`).
+  - **Indeed**: combined returned 120 unique jobs; split union returned 181 unique jobs (split recovered 61 extra, no combined-only losses).
+  - **LinkedIn**: combined returned 120 unique jobs; split union returned 180 unique jobs — but with only 51 in common. Combined had 69 unique jobs that split missed; split had 129 unique jobs that combined missed.
+- Decision: LinkedIn result sets are highly query-sensitive and partially non-overlapping between combined and split approaches. A fan-out/merge strategy would improve coverage but both approaches have blind spots. Held for a future session after resolving the UX question around result stability.
+
+### Speed and UX discussion
+
+- Discussed trade-offs of a LinkedIn fan-out strategy (multiple parallel queries, merged + deduped before returning to the user).
+- Decision: do not implement a "serve stale cache immediately, update in background" model — this would be jarring UX if results change after the user has already refreshed.
+- Fan-out and parallel-per-term scraping to be revisited as a future improvement, contingent on keeping the full merged result returned as a single response per refresh.
+
+### Results table status update
+
+- Added a new `Longlist` option to the results table status selector so jobs can be tracked between `New` and `Shortlist`.
+- Updated status text styling so `Longlist` renders in `#FF6600` in the status column.
+- Updated shared status validation/storage constants so API persistence accepts `Longlist` end-to-end.
+- Decision: keep `Longlist` as a first-class persisted status value (not a UI-only label) to ensure consistency across table controls and API routes.
+
 
