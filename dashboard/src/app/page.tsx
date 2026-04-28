@@ -33,7 +33,7 @@ type SearchData = {
   error?: string;
 };
 
-const STATUS_OPTIONS = ["New", "Skipped", "Applied", "Shortlist"] as const;
+const STATUS_OPTIONS = ["New", "Skipped", "Applied", "Shortlist", "Longlist"] as const;
 type JobStatus = (typeof STATUS_OPTIONS)[number];
 
 const VISIBLE_COLUMNS = ["title", "company", "location", "industry", "salary", "date_posted", "status"] as const;
@@ -61,6 +61,8 @@ function statusTextColor(status: JobStatus): { color: string } {
       return { color: "#29E061" };
     case "Shortlist":
       return { color: "#FFBF00" };
+    case "Longlist":
+      return { color: "#FF6600" };
     default:
       return { color: "#FFF" };
   }

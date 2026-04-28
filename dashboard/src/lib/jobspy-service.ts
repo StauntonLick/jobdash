@@ -13,6 +13,19 @@ export type SearchResult = {
   resultCount: number;
   lastUpdated: string;
   error?: string;
+  debug?: SearchDebugStats;
+};
+
+type SearchDebugStats = {
+  rawCount: number;
+  remoteFilteredCount: number;
+  titleFilteredCount: number;
+  dedupedCount: number;
+  finalCount: number;
+  excludedByRemoteFilter: number;
+  excludedByTitleFilter: number;
+  removedByDedupe: number;
+  includedByLinkedInRemoteFallback: number;
 };
 
 const CACHE_DIR = path.resolve(process.cwd(), ".cache", "searches");
@@ -32,7 +45,7 @@ const PYTHON_PATH_CANDIDATES = [
 
 let resolvedPythonPath: string | null = null;
 
-export const JOB_STATUS_VALUES = ["New", "Skipped", "Applied", "Shortlist"] as const;
+export const JOB_STATUS_VALUES = ["New", "Skipped", "Applied", "Shortlist", "Longlist"] as const;
 export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
 
 const INDUSTRY_RULES: Array<{ label: string; keywords: string[] }> = [
@@ -76,6 +89,16 @@ const BENEFITS_SECTION_HINTS = [
   "pension",
   "retirement plan",
   "wellness",
+];
+
+const LINKEDIN_REMOTE_HINTS = [
+  "remote",
+  "uk remote",
+  "work from home",
+  "wfh",
+  "home based",
+  "anywhere in the uk",
+  "united kingdom (remote)",
 ];
 
 async function ensureCacheDir(): Promise<void> {
@@ -394,6 +417,39 @@ function isRemoteResult(row: Record<string, unknown>): boolean {
   return normalized === "true" || normalized === "1" || normalized === "yes";
 }
 
+function isLinkedInResult(row: Record<string, unknown>): boolean {
+  return normalizeText(row.site) === "linkedin";
+}
+
+function isLikelyLinkedInRemote(row: Record<string, unknown>): boolean {
+  if (!isLinkedInResult(row)) {
+    return false;
+  }
+
+  const normalizedLocation = normalizeText(row.location);
+  // LinkedIn often returns remote jobs with no explicit location text.
+  if (!normalizedLocation) {
+    return true;
+  }
+
+  const searchableText = [
+    row.title,
+    row.location,
+    row.description,
+    row.job_type,
+    row.work_from_home_type,
+  ]
+    .map((value) => normalizeText(value))
+    .filter(Boolean)
+    .join(" ");
+
+  if (!searchableText) {
+    return false;
+  }
+
+  return LINKEDIN_REMOTE_HINTS.some((hint) => searchableText.includes(hint));
+}
+
 function normalizeSearchCriteria(
   criteria: SearchDefinition["criteria"]
 ): SearchDefinition["criteria"] {
@@ -507,10 +563,27 @@ function applyStoredIndustryOverrides(
   });
 }
 
-async function presentSearchResult(payload: SearchResult, filters: SearchFilters): Promise<SearchResult> {
+async function presentSearchResult(
+  payload: SearchResult,
+  filters: SearchFilters,
+  includeDebug = false
+): Promise<SearchResult> {
+  let linkedInRemoteFallbackCount = 0;
+  const rawResults = payload.results;
   const remoteFilteredResults = shouldEnforceRemoteOnly(payload.criteria)
-    ? payload.results.filter((row) => isRemoteResult(row))
-    : payload.results;
+    ? rawResults.filter((row) => {
+        if (isRemoteResult(row)) {
+          return true;
+        }
+
+        if (isLikelyLinkedInRemote(row)) {
+          linkedInRemoteFallbackCount += 1;
+          return true;
+        }
+
+        return false;
+      })
+    : rawResults;
   const enrichedResults = annotateDerivedFields(remoteFilteredResults);
   const titleFilteredResults = applyTitleFilters(enrichedResults, filters);
   const dedupedResults = dedupeResults(titleFilteredResults);
@@ -519,10 +592,25 @@ async function presentSearchResult(payload: SearchResult, filters: SearchFilters
   const industryOverrides = await readIndustryOverrideStore();
   const resultsWithIndustry = applyStoredIndustryOverrides(resultsWithStatus, industryOverrides);
 
+  const debug: SearchDebugStats | undefined = includeDebug
+    ? {
+        rawCount: rawResults.length,
+        remoteFilteredCount: remoteFilteredResults.length,
+        titleFilteredCount: titleFilteredResults.length,
+        dedupedCount: dedupedResults.length,
+        finalCount: resultsWithIndustry.length,
+        excludedByRemoteFilter: rawResults.length - remoteFilteredResults.length,
+        excludedByTitleFilter: remoteFilteredResults.length - titleFilteredResults.length,
+        removedByDedupe: titleFilteredResults.length - dedupedResults.length,
+        includedByLinkedInRemoteFallback: linkedInRemoteFallbackCount,
+      }
+    : undefined;
+
   return {
     ...payload,
     results: resultsWithIndustry,
     resultCount: resultsWithIndustry.length,
+    ...(debug ? { debug } : {}),
   };
 }
 
@@ -586,14 +674,15 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
 export async function loadOrRunSearch(
   definition: SearchDefinition,
   forceRefresh = false,
-  filters: SearchFilters = { includeTitleTerms: [], excludeTitleTerms: [] }
+  filters: SearchFilters = { includeTitleTerms: [], excludeTitleTerms: [] },
+  includeDebug = false
 ): Promise<SearchResult> {
   let cached: SearchResult | null = null;
 
   if (!forceRefresh) {
     cached = await readCache(definition.slug);
     if (cached && !isCacheStale(cached.lastUpdated)) {
-      return await presentSearchResult(cached, filters);
+      return await presentSearchResult(cached, filters, includeDebug);
     }
   }
 
@@ -608,7 +697,7 @@ export async function loadOrRunSearch(
       lastUpdated: new Date().toISOString(),
     };
     await writeCache(payload);
-    return await presentSearchResult(payload, filters);
+    return await presentSearchResult(payload, filters, includeDebug);
   } catch (error) {
     if (cached) {
       return await presentSearchResult(
@@ -616,7 +705,8 @@ export async function loadOrRunSearch(
         ...cached,
         error: String(error),
         },
-        filters
+        filters,
+        includeDebug
       );
     }
 
@@ -628,6 +718,6 @@ export async function loadOrRunSearch(
       resultCount: 0,
       lastUpdated: new Date().toISOString(),
       error: String(error),
-    }, filters);
+    }, filters, includeDebug);
   }
 }

@@ -9,7 +9,7 @@
     location="Edinburgh",
     distance="10",
     results_wanted=30,
-    hours_old=168,
+    hours_old=336,
     country_indeed="UK",
     is_remote="False"
 
@@ -20,7 +20,7 @@
     location="Glasgow",
     distance="10",
     results_wanted=30,
-    hours_old=168,
+    hours_old=336,
     country_indeed="UK",
     is_remote=False
 
@@ -31,7 +31,7 @@
     location="Newcastle",
     distance="10",
     results_wanted=30,
-    hours_old=168,
+    hours_old=336,
     country_indeed="UK",
     is_remote=False
 
@@ -41,7 +41,7 @@
     search_term='("UX" OR "Product Designer" OR "User Researcher"),
     location="Scotland",
     results_wanted=30,
-    hours_old=168,
+    hours_old=336,
     country_indeed="UK",
     is_remote=False
 
@@ -52,7 +52,7 @@
     location="London",
     distance="10",
     results_wanted=30,
-    hours_old=168,
+    hours_old=336,
     country_indeed="UK",
     is_remote=False
 
@@ -61,8 +61,8 @@
     site_name=["indeed", "linkedin", "glassdoor"],
     search_term='("UX" OR "Product Designer" OR "User Researcher"),
     location="United Kingdom",
-    results_wanted=30,
-    hours_old=168,
+    results_wanted=100,
+    hours_old=336,
     country_indeed="UK",
     is_remote=True
 
