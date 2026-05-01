@@ -12,6 +12,7 @@ export type SearchDefinition = {
 export type SearchFilters = {
   includeTitleTerms: string[];
   excludeTitleTerms: string[];
+  blacklistCompanies: string[];
 };
 
 export type SearchConfig = {
@@ -19,7 +20,8 @@ export type SearchConfig = {
   filters: SearchFilters;
 };
 
-const SEARCH_PARAMS_PATH = path.resolve(process.cwd(), "../CONFIG.MD");
+// Points to the user-editable config file one level above the dashboard folder.
+const CONFIG_PATH = path.resolve(process.cwd(), "../CONFIG.MD");
 
 function slugify(value: string): string {
   return value
@@ -28,6 +30,7 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+// Parse a JSON-style array string (e.g. '["indeed", "linkedin"]') into a string array.
 function parseArray(raw: string): string[] {
   const normalized = raw
     .replace(/'/g, '"')
@@ -46,6 +49,7 @@ function parseArray(raw: string): string[] {
   }
 }
 
+// Convert a raw string value to the appropriate JS type (array, boolean, number, or string).
 function parseScalar(raw: string): SearchCriteriaValue {
   const trimmed = raw.trim().replace(/,$/, "");
 
@@ -61,6 +65,7 @@ function parseScalar(raw: string): SearchCriteriaValue {
     return Number(trimmed);
   }
 
+  // Strip surrounding quotes from string values.
   return trimmed
     .replace(/^['\"]+/, "")
     .replace(/['\"]+$/, "")
@@ -68,136 +73,143 @@ function parseScalar(raw: string): SearchCriteriaValue {
     .trim();
 }
 
-function parseSection(lines: string[]): Record<string, SearchCriteriaValue> {
-  const criteria: Record<string, SearchCriteriaValue> = {};
+// Parse the "## BASIC SETTINGS" section. Each line is a bullet like "- key=value".
+function parseBasicSettings(lines: string[]): Record<string, SearchCriteriaValue> {
+  const settings: Record<string, SearchCriteriaValue> = {};
 
   for (const rawLine of lines) {
-    const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
+    const bulletMatch = rawLine.trim().match(/^-\s+(.+)$/);
+    if (!bulletMatch) continue;
 
-    const equalsAt = line.indexOf("=");
-    if (equalsAt <= 0) {
-      continue;
-    }
+    const item = bulletMatch[1].trim();
+    const equalsAt = item.indexOf("=");
+    if (equalsAt <= 0) continue;
 
-    const key = line.slice(0, equalsAt).trim();
-    const value = line.slice(equalsAt + 1).trim();
-
-    if (!key || !value) {
-      continue;
-    }
-
-    criteria[key] = parseScalar(value);
-  }
-
-  return criteria;
-}
-
-function parseFilters(lines: string[]): SearchFilters {
-  const filters: SearchFilters = {
-    includeTitleTerms: [],
-    excludeTitleTerms: [],
-  };
-
-  let activeList: keyof SearchFilters | null = null;
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-
-    if (/^Include jobs where the title includes/i.test(line)) {
-      activeList = "includeTitleTerms";
-      continue;
-    }
-
-    if (/^Exclude jobs where the title includes/i.test(line)) {
-      activeList = "excludeTitleTerms";
-      continue;
-    }
-
-    const bulletMatch = line.match(/^-\s+(.+)$/);
-    if (activeList && bulletMatch) {
-      filters[activeList].push(bulletMatch[1].trim());
+    const key = item.slice(0, equalsAt).trim();
+    const value = item.slice(equalsAt + 1).trim();
+    if (key && value) {
+      settings[key] = parseScalar(value);
     }
   }
 
-  return filters;
+  return settings;
 }
 
 export async function loadSearchConfig(): Promise<SearchConfig> {
-  const content = await fs.readFile(SEARCH_PARAMS_PATH, "utf8");
+  const content = await fs.readFile(CONFIG_PATH, "utf8");
   const lines = content.split(/\r?\n/);
-  const filterSection = content.split(/^##\s+FILTERS\s*$/im)[1] ?? "";
 
-  const sections: SearchDefinition[] = [];
+  // Track which top-level section (##) and sub-section (###) we're currently in.
+  type TopSection = "basic" | "locations" | "filters" | null;
+  type LocationSub = "inperson" | "remote" | null;
+  type FilterSub = "include" | "exclude" | "blacklist" | null;
 
-  let currentTitle = "";
-  let currentLines: string[] = [];
-  let inSearchParameters = false;
-  let inFilters = false;
+  let topSection: TopSection = null;
+  let locationSub: LocationSub = null;
+  let filterSub: FilterSub = null;
 
-  const flushSection = () => {
-    if (!currentTitle) {
-      return;
+  // Accumulate raw lines for basic settings, and items for each list.
+  const basicLines: string[] = [];
+  const inPersonItems: string[] = [];
+  const remoteItems: string[] = [];
+  const includeTitleTerms: string[] = [];
+  const excludeTitleTerms: string[] = [];
+  const blacklistCompanies: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    // Detect top-level (##) section changes.
+    if (/^##\s+BASIC SETTINGS\s*$/i.test(line)) {
+      topSection = "basic"; locationSub = null; filterSub = null; continue;
     }
-
-    sections.push({
-      slug: slugify(currentTitle),
-      title: currentTitle,
-      criteria: parseSection(currentLines),
-    });
-
-    currentLines = [];
-  };
-
-  for (const line of lines) {
-    if (/^##\s+SEARCH PARAMETERS\s*$/i.test(line)) {
-      flushSection();
-      currentTitle = "";
-      inSearchParameters = true;
-      inFilters = false;
-      continue;
+    if (/^##\s+LOCATIONS\s*$/i.test(line)) {
+      topSection = "locations"; locationSub = null; filterSub = null; continue;
     }
-
     if (/^##\s+FILTERS\s*$/i.test(line)) {
-      flushSection();
-      currentTitle = "";
-      inSearchParameters = false;
-      inFilters = true;
-      continue;
+      topSection = "filters"; locationSub = null; filterSub = null; continue;
     }
 
-    const searchHeaderMatch = line.match(/^###\s+(.+)$/);
-    if (inSearchParameters && searchHeaderMatch) {
-      flushSection();
-      currentTitle = searchHeaderMatch[1].trim();
-      continue;
+    // Detect sub-sections (###) within Locations.
+    if (topSection === "locations") {
+      if (/^###\s+In-Person/i.test(line)) { locationSub = "inperson"; continue; }
+      if (/^###\s+Remote Only/i.test(line)) { locationSub = "remote"; continue; }
     }
 
-    const legacyHeaderMatch = line.match(/^##\s+(.+)$/);
-    if (!inSearchParameters && !inFilters && legacyHeaderMatch) {
-      flushSection();
-      currentTitle = legacyHeaderMatch[1].trim();
-      continue;
+    // Detect sub-sections (###) within Filters.
+    if (topSection === "filters") {
+      if (/^###\s+INCLUDE\s*$/i.test(line)) { filterSub = "include"; continue; }
+      if (/^###\s+EXCLUDE\s*$/i.test(line)) { filterSub = "exclude"; continue; }
+      if (/^###\s+BLACKLIST\s*$/i.test(line)) { filterSub = "blacklist"; continue; }
     }
 
-    if (inFilters) {
-      continue;
-    }
+    // Collect bullet list items (lines starting with "- ").
+    const bulletMatch = line.match(/^-\s+(.+)$/);
+    if (!bulletMatch) continue;
+    const item = bulletMatch[1].trim();
 
-    if (currentTitle && inSearchParameters) {
-      currentLines.push(line);
-    } else if (currentTitle && !inFilters) {
-      currentLines.push(line);
+    if (topSection === "basic") {
+      basicLines.push(line); // Keep the full "- key=value" line for parseBasicSettings.
+    } else if (topSection === "locations") {
+      if (locationSub === "inperson") inPersonItems.push(item);
+      else if (locationSub === "remote") remoteItems.push(item);
+    } else if (topSection === "filters") {
+      if (filterSub === "include") includeTitleTerms.push(item);
+      else if (filterSub === "exclude") excludeTitleTerms.push(item);
+      else if (filterSub === "blacklist") blacklistCompanies.push(item);
     }
   }
 
-  flushSection();
+  // Parse the shared base criteria from Basic Settings.
+  const basicSettings = parseBasicSettings(basicLines);
+
+  const definitions: SearchDefinition[] = [];
+
+  // Build one search definition per in-person/hybrid/remote location.
+  // Each item has the format: "Location, Country, Distance"
+  for (const item of inPersonItems) {
+    const parts = item.split(",").map((p) => p.trim());
+    if (parts.length < 3) continue;
+
+    const [locationName, country, distanceStr] = parts;
+    const distance = Number(distanceStr);
+
+    definitions.push({
+      slug: slugify(locationName),
+      title: locationName,
+      criteria: {
+        ...basicSettings,
+        location: locationName,
+        distance: distance,
+        country_indeed: country,
+        is_remote: false,
+      },
+    });
+  }
+
+  // Build one search definition per remote-only region.
+  // Each item is just a region name (e.g. "UK", "Europe").
+  // The region name is used as both the location and country_indeed value.
+  for (const item of remoteItems) {
+    const region = item.trim();
+    if (!region) continue;
+
+    const title = `${region} Remote`;
+    definitions.push({
+      slug: slugify(title),
+      title,
+      criteria: {
+        ...basicSettings,
+        location: region,
+        country_indeed: region,
+        is_remote: true,
+      },
+    });
+  }
 
   return {
-    definitions: sections.filter((item) => Object.keys(item.criteria).length > 0),
-    filters: parseFilters(filterSection.split(/\r?\n/)),
+    definitions,
+    filters: { includeTitleTerms, excludeTitleTerms, blacklistCompanies },
   };
 }
 

@@ -1,75 +1,33 @@
-### This file contains a set of controls for JobSpy in lieu of user interface.
+# This file contains a set of controls for JobDash in lieu of a user interface.
+# JobDash will look at this configuration file when first running in order to build out the interface and search parameters
 
-## SEARCH PARAMETERS
+## BASIC SETTINGS
+These are the basic parameters to be passed to JobSpy (the service that does the actual search). Docs at https://github.com/speedyapply/JobSpy    
+- site_name=["indeed", "linkedin", "glassdoor"]
+- search_term='("UX" OR "Product Designer" OR "User Researcher")
+- results_wanted=100
+- hours_old=336
+- country_indeed="UK"
 
-### Edinburgh
+## LOCATIONS
+### In-Person/Hybrid/Remote
+JobDash will search for in-person, hybrid or remote roles in each of the following locations/countries and distances and create a tab to display them (e.g. "Edinburgh, UK, 10" will create a tab containing jobs within 10 miles of Edinburgh, UK). 
+- Edinburgh, UK, 10
+- Glasgow, UK, 10
+- Scotland, UK, 0
+- Newcastle, UK, 10
+- London, UK, 0
+- Melbourne, Australia, 0
 
-    site_name=["indeed", "linkedin", "glassdoor"],
-    search_term='("UX" OR "Product Designer" OR "User Researcher"),
-    location="Edinburgh",
-    distance="10",
-    results_wanted=30,
-    hours_old=336,
-    country_indeed="UK",
-    is_remote="False"
-
-### Glasgow
-
-    site_name=["indeed", "linkedin", "glassdoor"],
-    search_term='("UX" OR "Product Designer" OR "User Researcher"),
-    location="Glasgow",
-    distance="10",
-    results_wanted=30,
-    hours_old=336,
-    country_indeed="UK",
-    is_remote=False
-
-### Newcastle
-
-    site_name=["indeed", "linkedin", "glassdoor"],
-    search_term='("UX" OR "Product Designer" OR "User Researcher"),
-    location="Newcastle",
-    distance="10",
-    results_wanted=30,
-    hours_old=336,
-    country_indeed="UK",
-    is_remote=False
-
-### Scotland
-
-    site_name=["indeed", "linkedin", "glassdoor"],
-    search_term='("UX" OR "Product Designer" OR "User Researcher"),
-    location="Scotland",
-    results_wanted=30,
-    hours_old=336,
-    country_indeed="UK",
-    is_remote=False
-
-### London
-
-    site_name=["indeed", "linkedin", "glassdoor"],
-    search_term='("UX" OR "Product Designer" OR "User Researcher"),
-    location="London",
-    distance="10",
-    results_wanted=30,
-    hours_old=336,
-    country_indeed="UK",
-    is_remote=False
-
-### UK Remote
-
-    site_name=["indeed", "linkedin", "glassdoor"],
-    search_term='("UX" OR "Product Designer" OR "User Researcher"),
-    location="United Kingdom",
-    results_wanted=100,
-    hours_old=336,
-    country_indeed="UK",
-    is_remote=True
+### Remote Only
+JobDash will search for remote-only roles in these countries and create a tab to display them:
+- UK
 
 ## FILTERS
-Listings returned from the above searches will be filtered by these job titles to avoid false positives (e.g. where the search term is mentioned in the job description)
+Results returned from JobSpy will be further filtered as follows:
 
-Include jobs where the title includes at least one of the following:
+### INCLUDE
+Jobs with titles containing the following will be included:
 - UX
 - User Experience
 - User
@@ -77,7 +35,8 @@ Include jobs where the title includes at least one of the following:
 - Designer
 - Researcher
 
-Exclude jobs where the title includes any of the following:
+### EXCLUDE
+Jobs with titles containing the following will be excluded:
 - Developer
 - Artist
 - Engineer
@@ -87,3 +46,10 @@ Exclude jobs where the title includes any of the following:
 - Product Owner
 - Management
 - Marketing
+
+### BLACKLIST
+Companies in this list will be excluded:
+- DataAnnotation
+- Prolific
+- Rockstar Games
+

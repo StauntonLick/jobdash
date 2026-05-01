@@ -3,6 +3,8 @@
 ## Features
 
 Filter by status
+Tidy up config
+Add function to filter out companies
 
 ## Bugs
 

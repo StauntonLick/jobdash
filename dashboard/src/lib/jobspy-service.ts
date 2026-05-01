@@ -398,6 +398,20 @@ function applyTitleFilters(
   });
 }
 
+// Remove any jobs from companies that appear in the blacklist (case-insensitive).
+function applyCompanyBlacklist(
+  results: Array<Record<string, unknown>>,
+  filters: SearchFilters
+): Array<Record<string, unknown>> {
+  const blacklist = (filters.blacklistCompanies ?? []).map((name) => name.toLowerCase());
+  if (blacklist.length === 0) return results;
+
+  return results.filter((row) => {
+    const company = String(row.company ?? "").toLowerCase();
+    return !blacklist.some((name) => company.includes(name));
+  });
+}
+
 function shouldEnforceRemoteOnly(criteria: SearchDefinition["criteria"]): boolean {
   const remoteSetting = criteria.is_remote;
   if (typeof remoteSetting === "boolean") {
@@ -586,7 +600,8 @@ async function presentSearchResult(
     : rawResults;
   const enrichedResults = annotateDerivedFields(remoteFilteredResults);
   const titleFilteredResults = applyTitleFilters(enrichedResults, filters);
-  const dedupedResults = dedupeResults(titleFilteredResults);
+  const blacklistFilteredResults = applyCompanyBlacklist(titleFilteredResults, filters);
+  const dedupedResults = dedupeResults(blacklistFilteredResults);
   const statuses = await readStatusStore();
   const resultsWithStatus = applyStoredStatuses(dedupedResults, statuses);
   const industryOverrides = await readIndustryOverrideStore();
@@ -601,7 +616,7 @@ async function presentSearchResult(
         finalCount: resultsWithIndustry.length,
         excludedByRemoteFilter: rawResults.length - remoteFilteredResults.length,
         excludedByTitleFilter: remoteFilteredResults.length - titleFilteredResults.length,
-        removedByDedupe: titleFilteredResults.length - dedupedResults.length,
+        removedByDedupe: blacklistFilteredResults.length - dedupedResults.length,
         includedByLinkedInRemoteFallback: linkedInRemoteFallbackCount,
       }
     : undefined;
@@ -674,7 +689,7 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
 export async function loadOrRunSearch(
   definition: SearchDefinition,
   forceRefresh = false,
-  filters: SearchFilters = { includeTitleTerms: [], excludeTitleTerms: [] },
+  filters: SearchFilters = { includeTitleTerms: [], excludeTitleTerms: [], blacklistCompanies: [] },
   includeDebug = false
 ): Promise<SearchResult> {
   let cached: SearchResult | null = null;
