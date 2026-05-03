@@ -20,7 +20,7 @@ JobDash will search for in-person, hybrid or remote roles in each of the followi
 - Melbourne, Australia, 0
 
 ### Remote Only
-JobDash will search for remote-only roles in these countries and create a tab to display them:
+JobDash will search for remote roles in these countries and create a tab to display them. See the list of compatible countries in the JobSpy docs:
 - UK
 
 ## FILTERS
@@ -42,6 +42,7 @@ Jobs with titles containing the following will be excluded:
 - Engineer
 - Content
 - Graphic
+- Brand
 - Product Manager
 - Product Owner
 - Management
@@ -51,5 +52,6 @@ Jobs with titles containing the following will be excluded:
 Companies in this list will be excluded:
 - DataAnnotation
 - Prolific
+- Crossing Hurdles
 - Rockstar Games
 
