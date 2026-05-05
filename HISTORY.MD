@@ -96,4 +96,57 @@ This file is a dated running history of project changes and key decisions discus
 - Updated shared status validation/storage constants so API persistence accepts `Longlist` end-to-end.
 - Decision: keep `Longlist` as a first-class persisted status value (not a UI-only label) to ensure consistency across table controls and API routes.
 
+## 2026-05-05
+
+### LinkedIn pagination bug — investigation and fix
+
+- Investigated why a manual LinkedIn search for "UX Designer", remote UK, posted within 7 days returned 54 results, while JobSpy's equivalent query returned only 30.
+- Traced through the installed JobSpy source (`python-jobspy 1.1.82`) to identify root causes.
+
+**Findings:**
+
+- **Posting time filter (f_TPR) is applied correctly.** JobSpy computes `hours_old × 3600` to get seconds and sets `f_TPR=r{seconds_old}` on the LinkedIn request. For `hours_old=168`, this produces `f_TPR=r604800` — identical to the manual URL.
+- **GeoID is not used.** LinkedIn's guest API supports a `geoId` parameter (the manual search uses `geoId=101165590` for the UK). JobSpy does not resolve or send `geoId`; it passes the raw `location` string as plain text instead. This may reduce search precision compared to a logged-in browser session but is not a fixable gap without patching upstream.
+- **"UK" is not confused with Ukraine.** `Country.from_string()` uses exact token matching against comma-separated aliases. `UK` is listed as `"uk,united kingdom"` and `UKRAINE` as `"ukraine"`, so there is no collision.
+- **`country_indeed` is irrelevant for LinkedIn scoping.** The LinkedIn scraper hardcodes `self.country = "worldwide"` and never reads `scraper_input.country` when constructing request parameters. Country scoping relies entirely on the `location` text string.
+- **Confirmed pagination offset bug in `LinkedIn.scrape`.** The result window advances with `start += len(job_list)`, where `job_list` is the cumulative total of all results collected so far. This causes exponential drift: `0, 10, 30, 60 …` instead of the correct linear `0, 10, 20, 30 …`, skipping entire pages of LinkedIn results after page 2.
+
+**Fix — LinkedIn pagination patch** (`dashboard/scripts/jobspy_patches.py`, `dashboard/scripts/run_jobspy_search.py`):
+
+- Added `apply_linkedin_pagination_patch()` to `jobspy_patches.py`, following the same monkey-patch guard pattern as the existing Glassdoor patch.
+- The patched `scrape` method is identical to the original except for one line: `start += len(job_list)` → `start += len(job_cards)`, which advances by the current page's card count instead of the running total.
+- Called `apply_linkedin_pagination_patch()` in `run_jobspy_search.py` alongside the existing Glassdoor patch.
+- Result: the same UX Designer remote UK 7-day query returned **41 jobs** after the fix, up from **30** — recovering 11 previously skipped results.
+- Decision: the remaining gap vs. the 54 manual results is expected. LinkedIn's unauthenticated guest API surfaces fewer results than a logged-in browser session; this is a fundamental limitation of the scraping approach and not addressable within the project.
+
+### Search performance — parallel site scraping and LinkedIn throttle reduction
+
+**Problem:** Refreshing a single search tab was taking over 80 seconds.
+
+**Root causes identified:**
+
+- **LinkedIn inter-page throttle.** JobSpy's LinkedIn scraper sleeps 3–7 seconds between every page of results. At 100 results wanted, this means ~10 pages × up to 7s = potentially 70s for LinkedIn alone.
+- **Sequential site execution inside the Python runner.** Although JobSpy's own `scrape_jobs()` uses a thread pool internally, our wrapper called it once with all three sites, which does not expose the right parallelism surface for controlling per-site result budgets.
+- **Over-large result target.** `results_wanted=100` was requested per site but the Edinburgh UX query is source-limited around ~50 results anyway, so the extra pages were wasted wait time.
+
+**Changes made (`dashboard/scripts/run_jobspy_search.py`, `dashboard/scripts/jobspy_patches.py`):**
+
+- **LinkedIn delay tuning** — reduced default page delay from 3–7s to 1–2.5s (1s base, 1.5s band). Values are env-configurable via `JOBDASH_LINKEDIN_DELAY_SECONDS` / `JOBDASH_LINKEDIN_BAND_DELAY_SECONDS`.
+- **Explicit per-site parallel execution** — when multiple sites are configured, the runner now spawns one thread per site (capped at 4), each calling `scrape_jobs` for a single site. This makes the total wall time roughly equal to the slowest individual site rather than their sum, and tolerates partial failures without losing results from other sites.
+- **Added runtime timing metadata** — the runner now includes `duration_seconds` in its JSON output for profiling.
+- **Set `results_wanted` to 60 per site** in `CONFIG.MD` — benchmarking showed result counts plateau at ~52 for the Edinburgh query regardless of cap, so 60 per site was the sweet spot with no missed results.
+
+**Benchmark results (Edinburgh UX, 3 sites, hours_old=336):**
+
+| `results_wanted` per site | Returned count | Duration |
+|---|---|---|
+| 60 | 52 | ~11.6s |
+| 80 | 52 | ~11.8s |
+| 100 | 52 | ~12.9s |
+| 120 | 52 | ~12.5s |
+
+- Decision: count plateaus at 52, so the query is source-limited. Setting 60 per site retains full coverage with slightly less overhead.
+- Decision: `results_wanted=60` is now the default in `CONFIG.MD`.
+- Overall improvement: refresh time reduced from ~80s to ~12s.
+
 

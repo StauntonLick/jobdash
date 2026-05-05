@@ -5,7 +5,7 @@
 These are the basic parameters to be passed to JobSpy (the service that does the actual search). Docs at https://github.com/speedyapply/JobSpy    
 - site_name=["indeed", "linkedin", "glassdoor"]
 - search_term='("UX" OR "Product Designer" OR "User Researcher")
-- results_wanted=100
+- results_wanted=60
 - hours_old=336
 - country_indeed="UK"
 
