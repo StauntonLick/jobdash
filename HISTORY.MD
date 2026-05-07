@@ -149,4 +149,25 @@ This file is a dated running history of project changes and key decisions discus
 - Decision: `results_wanted=60` is now the default in `CONFIG.MD`.
 - Overall improvement: refresh time reduced from ~80s to ~12s.
 
+## 2026-05-07
+
+### Figma v1 design sync, implementation pass, and manual spacing handoff
+
+- Connected to Figma MCP and pulled `Design (v1 Final)` context for implementation reference.
+- Reworked dashboard visual styling to match the new design direction:
+  - Updated `dashboard/src/app/globals.css` semantic colors to the new palette (navy/cream/orange system).
+  - Switched root HTML out of forced dark mode in `dashboard/src/app/layout.tsx` so the page can render with light backgrounds as intended.
+  - Refactored `dashboard/src/app/page.tsx` structure and utility classes to match the Figma-style composition (header, tabs, and table spacing/containers).
+  - Updated status color mapping in `dashboard/src/app/page.tsx` to align with the new status palette.
+- Added design token infrastructure for Figma round-trip workflows:
+  - Added `dashboard/src/design/tokens/jobdash.tokens.json` as a token source file.
+  - Added `dashboard/scripts/export_figma_csv.mjs` token exporter.
+  - Generated `dashboard/src/design/tokens/jobdash.figma.token-importer.no-header.csv` from token definitions.
+- Iterated on layout bugs requested during review:
+  - Header-only blue region vs cream body behavior.
+  - Tabs overflow/height and left alignment behavior.
+  - Table container height and scroll behavior.
+- During later comparison passes, Figma MCP screenshot calls hit plan rate limits; validation continued using previously fetched design context plus live browser snapshots.
+- Final workflow decision for this session: pause automatic pixel-tuning and hand off spacing polish for manual adjustment, with exact file/line guidance provided for editing.
+
 

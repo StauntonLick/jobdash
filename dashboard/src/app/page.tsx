@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronDown, Link2, RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,15 +55,15 @@ function toJobStatus(value: unknown): JobStatus {
 function statusTextColor(status: JobStatus): { color: string } {
   switch (status) {
     case "Skipped":
-      return { color: "#8F93A6" };
+      return { color: "#A8A794" };
     case "Applied":
-      return { color: "#29E061" };
+      return { color: "#1AAB32" };
     case "Shortlist":
-      return { color: "#FFBF00" };
+      return { color: "#FF6200" };
     case "Longlist":
-      return { color: "#FF6600" };
+      return { color: "#F2BF00" };
     default:
-      return { color: "#FFF" };
+      return { color: "#172542" };
   }
 }
 
@@ -465,169 +464,171 @@ export default function Home() {
   }
 
   return (
-    <main className="min-h-screen bg-background p-4 md:p-8">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <section className="space-y-3 px-1">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="space-y-2">
-              <h1 className="text-2xl font-semibold">JobSpy Dashboard</h1>
-              <p className="text-sm text-muted-foreground">
-                A simple wrapper for JobSpy. Set your preferences in CONFIG.MD.
-              </p>
-              {error ? <p className="text-sm text-red-600">{error}</p> : null}
+    <main className="flex min-h-screen flex-col bg-card">
+      <Tabs value={resolvedActiveTab} onValueChange={setActiveTab} className="flex min-h-screen flex-col gap-0">
+        <section className="bg-secondary text-secondary-foreground">
+          <div className="mx-auto max-w-[1280px] px-24 pt-24 pb-16">
+            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+              <h1 className="text-6xl font-black leading-none tracking-tight">jobbity.</h1>
+
+              <div className="flex items-center gap-2.5">
+                <p className="text-sm text-secondary-foreground/95">Last updated: {globalLastUpdated ?? "-"}</p>
+                <Button
+                  onClick={() => void refreshAll()}
+                  disabled={refreshingAll}
+                  size="sm"
+                  className="h-9 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                >
+                  <RotateCw className={`mr-2 h-4 w-4 ${refreshingAll ? "animate-spin" : ""}`} />
+                  Refresh All
+                </Button>
+              </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <p className="text-sm text-muted-foreground">
-                Last updated: {globalLastUpdated ?? "-"}
-              </p>
-              <Button onClick={() => void refreshAll()} disabled={refreshingAll} size="sm">
-                <RotateCw className={`mr-2 h-4 w-4 ${refreshingAll ? "animate-spin" : ""}`} />
-                Refresh All
-              </Button>
+            <div className="w-full overflow-x-auto overflow-y-hidden whitespace-nowrap">
+              <TabsList className="h-[36px] w-fit min-w-max justify-start bg-transparent p-[3px]">
+                {searches.map((search) => (
+                  <TabsTrigger
+                    key={search.slug}
+                    value={search.slug}
+                    className="!flex-none h-[29px] rounded-full px-4 py-1 text-sm font-medium text-secondary-foreground/95 data-active:bg-primary data-active:text-primary-foreground"
+                  >
+                    {search.title} ({search.resultCount})
+                  </TabsTrigger>
+                ))}
+              </TabsList>
             </div>
           </div>
         </section>
 
-        <Card>
-          <CardContent className="space-y-4">
-            <Tabs value={resolvedActiveTab} onValueChange={setActiveTab}>
-              <ScrollArea className="w-full whitespace-nowrap">
-                <TabsList className="h-auto min-w-full justify-start bg-transparent">
-                  {searches.map((search) => (
-                    <TabsTrigger key={search.slug} value={search.slug} className="px-3 py-2">
-                      {search.title} ({search.resultCount})
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-              </ScrollArea>
-
-              {searches.map((search) => (
-                <TabsContent key={search.slug} value={search.slug} className="space-y-4 pt-4">
-                  <CardHeader className="p-0">
-                    <CardTitle className="text-lg">{search.title}</CardTitle>
-                  </CardHeader>
-
-                  <ScrollArea className="h-[540px] w-full rounded-md border">
-                    <div className="min-w-[1100px]">
-                      <Table>
-                        <TableHeader>
+        <section className="flex min-h-0 flex-1 bg-card">
+          <div className="mx-auto flex h-full w-full max-w-[1280px] flex-col">
+            {searches.map((search) => (
+              <TabsContent
+                key={search.slug}
+                value={search.slug}
+                className="flex h-full min-h-0 flex-1 flex-col px-6 pb-6 pt-8 text-card-foreground"
+              >
+                <ScrollArea className="min-h-0 flex-1 w-full">
+                  <div className="min-w-[1100px]">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="border-b border-[#17254214]">
+                          {VISIBLE_COLUMNS.map((column) => (
+                            <TableHead
+                              key={column}
+                              className={column === "title" ? "h-10 w-[240px] max-w-[240px] px-2 text-sm font-bold capitalize text-[#18727A]" : "h-10 px-2 text-sm font-bold capitalize text-[#18727A]"}
+                            >
+                              {column === "date_posted"
+                                ? "Age"
+                                : column === "industry"
+                                ? "Industry"
+                                : column === "salary"
+                                ? "Salary"
+                                : column === "status"
+                                ? "Status"
+                                : column.replace(/_/g, " ")}
+                            </TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {search.results.length === 0 ? (
                           <TableRow>
-                            {VISIBLE_COLUMNS.map((column) => (
-                              <TableHead
-                                key={column}
-                                className={column === "title" ? "w-[250px] max-w-[250px] capitalize" : "capitalize"}
-                              >
-                                {column === "date_posted"
-                                  ? "Age"
-                                  : column === "industry"
-                                  ? "Industry"
-                                  : column === "salary"
-                                  ? "Salary"
-                                  : column === "status"
-                                  ? "Status"
-                                  : column.replace(/_/g, " ")}
-                              </TableHead>
-                            ))}
+                            <TableCell colSpan={VISIBLE_COLUMNS.length} className="px-2 text-sm text-card-foreground">
+                              No jobs found for this search.
+                            </TableCell>
                           </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {search.results.length === 0 ? (
-                            <TableRow>
-                              <TableCell colSpan={VISIBLE_COLUMNS.length}>
-                                No jobs found for this search.
-                              </TableCell>
-                            </TableRow>
-                          ) : (
-                            [...search.results]
-                              .sort((a, b) => {
-                                const da = a["date_posted"]
-                                  ? new Date(String(a["date_posted"])).getTime()
-                                  : 0;
-                                const db = b["date_posted"]
-                                  ? new Date(String(b["date_posted"])).getTime()
-                                  : 0;
-                                return db - da;
-                              })
-                              .map((row, index) => (
-                                <TableRow key={`${search.slug}-${index}`}>
-                                  {VISIBLE_COLUMNS.map((column) => (
-                                    <TableCell
-                                      key={`${search.slug}-${index}-${column}`}
-                                      className={column === "title" ? "w-[250px] max-w-[250px]" : undefined}
-                                    >
-                                      {column === "title" ? (
-                                        <JobTitleCell
-                                          title={String(row["title"] ?? "")}
-                                          links={
-                                            isJobLinkArray(row["job_url"])
-                                              ? row["job_url"]
-                                              : row["job_url"]
-                                              ? [{ site: "view", url: String(row["job_url"]) }]
-                                              : []
+                        ) : (
+                          [...search.results]
+                            .sort((a, b) => {
+                              const da = a["date_posted"]
+                                ? new Date(String(a["date_posted"])).getTime()
+                                : 0;
+                              const db = b["date_posted"]
+                                ? new Date(String(b["date_posted"])).getTime()
+                                : 0;
+                              return db - da;
+                            })
+                            .map((row, index) => (
+                              <TableRow key={`${search.slug}-${index}`} className="border-b border-[#17254214] hover:bg-card/95">
+                                {VISIBLE_COLUMNS.map((column) => (
+                                  <TableCell
+                                    key={`${search.slug}-${index}-${column}`}
+                                    className={column === "title" ? "h-[37px] w-[240px] max-w-[240px] px-2 text-sm text-card-foreground" : "h-[37px] px-2 text-sm text-card-foreground"}
+                                  >
+                                    {column === "title" ? (
+                                      <JobTitleCell
+                                        title={String(row["title"] ?? "")}
+                                        links={
+                                          isJobLinkArray(row["job_url"])
+                                            ? row["job_url"]
+                                            : row["job_url"]
+                                            ? [{ site: "view", url: String(row["job_url"]) }]
+                                            : []
+                                        }
+                                      />
+                                    ) : column === "date_posted" ? (
+                                      formatAge(row[column])
+                                    ) : column === "industry" ? (
+                                      <IndustryCell
+                                        industry={String(row["industry_label"] ?? "")}
+                                        onChange={(nextIndustry) => {
+                                          const statusKey = String(
+                                            row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
+                                          )
+                                            .trim()
+                                            .toLowerCase();
+
+                                          if (!statusKey) {
+                                            setError("Unable to update industry for this row.");
+                                            return;
                                           }
-                                        />
-                                      ) : column === "date_posted" ? (
-                                        formatAge(row[column])
-                                      ) : column === "industry" ? (
-                                        <IndustryCell
-                                          industry={String(row["industry_label"] ?? "")}
-                                          onChange={(nextIndustry) => {
-                                            const statusKey = String(
-                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
-                                            )
-                                              .trim()
-                                              .toLowerCase();
 
-                                            if (!statusKey) {
-                                              setError("Unable to update industry for this row.");
-                                              return;
-                                            }
+                                          void updateJobIndustry(statusKey, nextIndustry);
+                                        }}
+                                      />
+                                    ) : column === "salary" ? (
+                                      formatSalary(row)
+                                    ) : column === "status" ? (
+                                      <JobStatusCell
+                                        status={toJobStatus(row["job_status"])}
+                                        onChange={(nextStatus) => {
+                                          const statusKey = String(
+                                            row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
+                                          )
+                                            .trim()
+                                            .toLowerCase();
 
-                                            void updateJobIndustry(statusKey, nextIndustry);
-                                          }}
-                                        />
-                                      ) : column === "salary" ? (
-                                        formatSalary(row)
-                                      ) : column === "status" ? (
-                                        <JobStatusCell
-                                          status={toJobStatus(row["job_status"])}
-                                          onChange={(nextStatus) => {
-                                            const statusKey = String(
-                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
-                                            )
-                                              .trim()
-                                              .toLowerCase();
+                                          if (!statusKey) {
+                                            setError("Unable to update status for this row.");
+                                            return;
+                                          }
 
-                                            if (!statusKey) {
-                                              setError("Unable to update status for this row.");
-                                              return;
-                                            }
+                                          void updateJobStatus(statusKey, nextStatus);
+                                        }}
+                                      />
+                                    ) : (
+                                      toDisplayValue(row[column])
+                                    )}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ))
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </ScrollArea>
 
-                                            void updateJobStatus(statusKey, nextStatus);
-                                          }}
-                                        />
-                                      ) : (
-                                        toDisplayValue(row[column])
-                                      )}
-                                    </TableCell>
-                                  ))}
-                                </TableRow>
-                              ))
-                          )}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </ScrollArea>
-                </TabsContent>
-              ))}
-            </Tabs>
-          </CardContent>
-        </Card>
+                {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+              </TabsContent>
+            ))}
 
-        {!activeSearch ? <p className="text-sm text-slate-500">No searches available.</p> : null}
-
-      </div>
+            {!activeSearch ? <p className="px-6 py-3 text-sm text-muted-foreground">No searches available.</p> : null}
+          </div>
+        </section>
+      </Tabs>
     </main>
   );
 }

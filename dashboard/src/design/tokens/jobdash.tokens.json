@@ -1,0 +1,187 @@
+{
+  "$schema": "https://www.designtokens.org/schemas/2025.10/format.json",
+  "color": {
+    "$description": "Color tokens for JobDash",
+    "primitive": {
+      "$description": "Raw palette values",
+      "neutral": {
+        "$type": "color",
+        "n0": {
+          "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#FFFFFF" }
+        },
+        "n50": {
+          "$value": { "colorSpace": "srgb", "components": [0.941, 0.937, 0.831], "hex": "#F0EFD4" }
+        },
+        "n100": {
+          "$value": { "colorSpace": "srgb", "components": [0.82, 0.816, 0.722], "hex": "#D1D0B8" }
+        },
+        "n300": {
+          "$value": { "colorSpace": "srgb", "components": [0.659, 0.655, 0.58], "hex": "#A8A794" }
+        },
+        "n500": {
+          "$value": { "colorSpace": "srgb", "components": [0.659, 0.655, 0.58], "hex": "#A8A794" }
+        },
+        "n700": {
+          "$value": { "colorSpace": "srgb", "components": [0.094, 0.145, 0.259], "hex": "#182542" }
+        },
+        "n900": {
+          "$value": { "colorSpace": "srgb", "components": [0.09, 0.145, 0.259], "hex": "#172542" }
+        }
+      },
+      "brand": {
+        "$type": "color",
+        "b500": {
+          "$value": { "colorSpace": "srgb", "components": [0.824, 0.392, 0.161], "hex": "#D26429" }
+        },
+        "b600": {
+          "$value": { "colorSpace": "srgb", "components": [0.745, 0.345, 0.129], "hex": "#BE5821" }
+        }
+      },
+      "warning": {
+        "$type": "color",
+        "w500": {
+          "$value": { "colorSpace": "srgb", "components": [0.949, 0.749, 0], "hex": "#F2BF00" }
+        }
+      },
+      "danger": {
+        "$type": "color",
+        "d500": {
+          "$value": { "colorSpace": "srgb", "components": [1, 0.384, 0], "hex": "#FF6200" }
+        }
+      },
+      "success": {
+        "$type": "color",
+        "s500": {
+          "$value": { "colorSpace": "srgb", "components": [0.102, 0.671, 0.196], "hex": "#1AAB32" }
+        }
+      }
+    },
+    "semantic": {
+      "$type": "color",
+      "background": { "$value": "{color.primitive.neutral.n900}" },
+      "foreground": { "$value": "{color.primitive.neutral.n0}" },
+      "card": { "$value": "{color.primitive.neutral.n50}" },
+      "card-foreground": { "$value": "{color.primitive.neutral.n900}" },
+      "popover": { "$value": "{color.primitive.neutral.n50}" },
+      "popover-foreground": { "$value": "{color.primitive.neutral.n900}" },
+      "primary": { "$value": "{color.primitive.brand.b500}" },
+      "primary-foreground": { "$value": "{color.primitive.neutral.n0}" },
+      "secondary": { "$value": "{color.primitive.neutral.n900}" },
+      "secondary-foreground": { "$value": "{color.primitive.neutral.n0}" },
+      "muted": { "$value": "{color.primitive.neutral.n100}" },
+      "muted-foreground": { "$value": "{color.primitive.neutral.n500}" },
+      "accent": { "$value": "{color.primitive.neutral.n700}" },
+      "accent-foreground": { "$value": "{color.primitive.neutral.n0}" },
+      "destructive": { "$value": "{color.primitive.danger.d500}" },
+      "destructive-foreground": { "$value": "{color.primitive.neutral.n0}" },
+      "border": { "$value": "{color.primitive.neutral.n100}" },
+      "input": { "$value": "{color.primitive.neutral.n100}" },
+      "ring": { "$value": "{color.primitive.brand.b500}" }
+    },
+    "status": {
+      "$type": "color",
+      "new": { "$value": "{color.semantic.card-foreground}" },
+      "skipped": { "$value": "{color.primitive.neutral.n500}" },
+      "applied": { "$value": "{color.primitive.success.s500}" },
+      "shortlist": { "$value": "{color.primitive.danger.d500}" },
+      "longlist": { "$value": "{color.primitive.warning.w500}" }
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "none": { "$value": { "value": 0, "unit": "px" } },
+    "sm": { "$value": { "value": 4, "unit": "px" } },
+    "md": { "$value": { "value": 8, "unit": "px" } },
+    "lg": { "$value": { "value": 12, "unit": "px" } },
+    "xl": { "$value": { "value": 16, "unit": "px" } },
+    "full": { "$value": { "value": 9999, "unit": "px" } }
+  },
+  "space": {
+    "$type": "dimension",
+    "s0": { "$value": { "value": 0, "unit": "px" } },
+    "s1": { "$value": { "value": 4, "unit": "px" } },
+    "s2": { "$value": { "value": 8, "unit": "px" } },
+    "s3": { "$value": { "value": 12, "unit": "px" } },
+    "s4": { "$value": { "value": 16, "unit": "px" } },
+    "s5": { "$value": { "value": 20, "unit": "px" } },
+    "s6": { "$value": { "value": 24, "unit": "px" } },
+    "s8": { "$value": { "value": 32, "unit": "px" } },
+    "s10": { "$value": { "value": 40, "unit": "px" } },
+    "s12": { "$value": { "value": 48, "unit": "px" } }
+  },
+  "size": {
+    "$type": "dimension",
+    "control-sm": { "$value": { "value": 32, "unit": "px" } },
+    "control-md": { "$value": { "value": 36, "unit": "px" } },
+    "control-lg": { "$value": { "value": 40, "unit": "px" } }
+  },
+  "typography": {
+    "font-family": {
+      "$type": "fontFamily",
+      "base": { "$value": ["Geist", "ui-sans-serif", "system-ui", "sans-serif"] },
+      "mono": { "$value": ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"] }
+    },
+    "font-size": {
+      "$type": "dimension",
+      "xs": { "$value": { "value": 12, "unit": "px" } },
+      "sm": { "$value": { "value": 14, "unit": "px" } },
+      "md": { "$value": { "value": 16, "unit": "px" } },
+      "lg": { "$value": { "value": 18, "unit": "px" } },
+      "xl": { "$value": { "value": 20, "unit": "px" } }
+    },
+    "font-weight": {
+      "$type": "fontWeight",
+      "regular": { "$value": 400 },
+      "medium": { "$value": 500 },
+      "semibold": { "$value": 600 },
+      "bold": { "$value": 700 }
+    },
+    "line-height": {
+      "$type": "number",
+      "tight": { "$value": 1.2 },
+      "normal": { "$value": 1.5 }
+    }
+  },
+  "shadow": {
+    "$type": "shadow",
+    "sm": {
+      "$value": {
+        "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.2 },
+        "offsetX": { "value": 0, "unit": "px" },
+        "offsetY": { "value": 1, "unit": "px" },
+        "blur": { "value": 2, "unit": "px" },
+        "spread": { "value": 0, "unit": "px" }
+      }
+    },
+    "md": {
+      "$value": {
+        "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.24 },
+        "offsetX": { "value": 0, "unit": "px" },
+        "offsetY": { "value": 4, "unit": "px" },
+        "blur": { "value": 12, "unit": "px" },
+        "spread": { "value": 0, "unit": "px" }
+      }
+    },
+    "lg": {
+      "$value": {
+        "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.28 },
+        "offsetX": { "value": 0, "unit": "px" },
+        "offsetY": { "value": 10, "unit": "px" },
+        "blur": { "value": 30, "unit": "px" },
+        "spread": { "value": 0, "unit": "px" }
+      }
+    }
+  },
+  "motion": {
+    "duration": {
+      "$type": "duration",
+      "fast": { "$value": { "value": 120, "unit": "ms" } },
+      "normal": { "$value": { "value": 180, "unit": "ms" } },
+      "slow": { "$value": { "value": 260, "unit": "ms" } }
+    },
+    "easing": {
+      "$type": "cubicBezier",
+      "standard": { "$value": [0.2, 0, 0, 1] }
+    }
+  }
+}

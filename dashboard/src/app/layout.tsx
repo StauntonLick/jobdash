@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+
 export const metadata: Metadata = {
   title: "JobSpy Dashboard",
   description: "A simple wrapper for JobSpy",
@@ -26,7 +27,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={cn("dark", "h-full", "antialiased", geistSans.variable, geistMono.variable)}
+      className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable)}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">{children}</body>
     </html>
