@@ -2,6 +2,12 @@
 
 This file is a dated running history of project changes and key decisions discussed in the repository.
 
+## 2026-05-09
+
+- Restored `linkedin_fetch_description=True` in `CONFIG.MD` so LinkedIn listings fetch full descriptions again in the sidebar.
+- Updated sidebar header controls in `dashboard/src/app/page.tsx`: status trigger now stays white across all status values, its chevron is always visible, and the `Apply` action now includes an external-link icon to the right of the label.
+- Fixed a regression in `dashboard/src/app/page.tsx` by scoping the white status trigger and always-visible chevron to the sidebar header only; table status controls use per-status colors again.
+
 ## 2026-04-22
 
 - Initial commit created the project foundation: `JobDashboard.py`, `jobs.csv`, `CONFIG.MD`, `pyproject.toml`, `poetry.lock`, and base repo config.
@@ -203,5 +209,29 @@ This file is a dated running history of project changes and key decisions discus
   - Removed sticky header behavior from the results table and made the header static.
   - Moved scrolling so only the `search-results-body` section scrolls, preventing the scrollbar from running behind the header.
   - Decision: preserve header/body column alignment with a split static-header + scrollable-body table layout instead of relying on sticky positioning.
+
+  ### Figma token re-import sync
+
+  - Updated `dashboard/src/app/globals.css` so `:root` now sources color variables from the latest re-exported token set.
+  - Kept existing app-facing semantic variables (`--primary`, `--secondary`, `--card`, etc.) as aliases to the imported Figma token variables to preserve Tailwind utility usage.
+  - Updated secondary alias mapping to use semantic tokens directly: `--secondary -> --color-semantic-secondary` and `--secondary-foreground -> --color-semantic-secondary-foreground`.
+
+  ### Tailwind line-height token wiring
+
+  - Added Tailwind `leading-*` theme variables in `dashboard/src/app/globals.css` that map to the imported Figma line-height tokens so app typography can use the re-exported values directly.
+
+### Temporary token import cleanup
+
+- Removed remaining references to the temporary token-import stylesheet from repository content.
+
+  ### Sidebar posting date display update
+
+  - Updated the job details sidebar in `dashboard/src/app/page.tsx` to show the posting date in `dd/mm/yy` format instead of the relative age text (`hours`/`days`).
+  - Updated the sidebar header date rendering so missing/invalid posting dates display as empty (no `-`) and the adjacent separator dot is hidden when no date is available.
+
+  ### Tab bar color token fix
+
+  - Fixed the dashboard tab list background class in `dashboard/src/app/page.tsx` by replacing invalid `bg-muted-background` with `bg-muted`.
+  - Updated tab trigger colors to restore visible contrast in the header: inactive text now uses `text-foreground/70`, hover uses `bg-secondary` + `text-secondary-foreground`, and active state uses `bg-background` + `text-foreground`.
 
 

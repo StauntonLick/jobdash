@@ -1,14 +1,8 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
-import { Geist_Mono, Poppins } from "next/font/google";
+import { Geist_Mono, Nunito } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
-
-const poppins = Poppins({
-  variable: "--font-poppins",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-});
 
 const rubikOne = localFont({
   src: "./fonts/RubikOne-Regular.ttf",
@@ -18,6 +12,11 @@ const rubikOne = localFont({
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
+  subsets: ["latin"],
+});
+
+const nunito = Nunito({
+  variable: "--font-nunito",
   subsets: ["latin"],
 });
 
@@ -35,7 +34,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={cn("h-full", "antialiased", poppins.variable, rubikOne.variable, geistMono.variable)}
+      className={cn("h-full", "antialiased", nunito.variable, rubikOne.variable, geistMono.variable)}
     >
       <body className="min-h-full flex flex-col bg-background text-foreground">{children}</body>
     </html>

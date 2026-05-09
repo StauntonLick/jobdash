@@ -8,6 +8,7 @@ These are the basic parameters to be passed to JobSpy (the service that does the
 - results_wanted=60
 - hours_old=240 
 - country_indeed="UK"
+- linkedin_fetch_description=True
 
 ## LOCATIONS
 ### In-Person/Hybrid/Remote

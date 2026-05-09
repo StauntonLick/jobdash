@@ -1,7 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronDown, Link2, RotateCw } from "lucide-react";
+import { ChevronDown, ExternalLink, RotateCw, X } from "lucide-react";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -41,6 +43,11 @@ type JobLink = {
   site: string;
   url: string;
   location?: string;
+};
+
+type JobSelection = {
+  searchSlug: string;
+  statusKey: string;
 };
 
 function toJobStatus(value: unknown): JobStatus {
@@ -112,6 +119,18 @@ function formatAge(dateValue: unknown): string {
   return diffDays === 1 ? "1 day" : `${diffDays} days`;
 }
 
+function formatPostingDate(dateValue: unknown): string {
+  if (!dateValue || dateValue === "-") return "";
+  const posted = new Date(String(dateValue));
+  if (Number.isNaN(posted.getTime())) return "";
+
+  const day = String(posted.getDate()).padStart(2, "0");
+  const month = String(posted.getMonth() + 1).padStart(2, "0");
+  const year = String(posted.getFullYear()).slice(-2);
+
+  return `${day}/${month}/${year}`;
+}
+
 function formatCurrencyPrefix(currency: string): string {
   try {
     const parts = new Intl.NumberFormat("en-GB", {
@@ -174,69 +193,250 @@ function formatSiteName(site: string): string {
     .join(" ");
 }
 
+function getStatusKey(row: Record<string, unknown>): string {
+  return String(row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`)
+    .trim()
+    .toLowerCase();
+}
+
+function deriveWorkMode(row: Record<string, unknown>): string {
+  const explicitMode = String(row["work_mode"] ?? row["location_type"] ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (explicitMode.includes("hybrid")) {
+    return "Hybrid";
+  }
+
+  if (explicitMode.includes("remote")) {
+    return "Remote";
+  }
+
+  if (explicitMode.includes("in-person") || explicitMode.includes("onsite") || explicitMode.includes("on-site")) {
+    return "In-Person";
+  }
+
+  const isRemote = String(row["is_remote"] ?? "").trim().toLowerCase();
+  if (isRemote === "true") {
+    return "Remote";
+  }
+
+  const remoteFlag = String(row["remote"] ?? "").trim().toLowerCase();
+  if (remoteFlag === "true") {
+    return "Remote";
+  }
+
+  const locationText = String(row["location"] ?? "")
+    .trim()
+    .toLowerCase();
+
+  if (locationText.includes("hybrid")) {
+    return "Hybrid";
+  }
+
+  if (locationText.includes("remote")) {
+    return "Remote";
+  }
+
+  return "In-Person";
+}
+
+function JobApplyAction({ links }: { links: JobLink[] }) {
+  if (links.length === 0) {
+    return (
+      <span className="inline-flex items-center gap-1 text-secondary-foreground/60">
+        Apply
+        <ExternalLink className="h-4 w-4" />
+      </span>
+    );
+  }
+
+  if (links.length === 1) {
+    return (
+      <a
+        href={links[0].url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="inline-flex items-center gap-1 hover:opacity-80"
+      >
+        Apply
+        <ExternalLink className="h-4 w-4" />
+      </a>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger className="group inline-flex items-center gap-1 hover:opacity-80 transition-opacity">
+        Apply
+        <ExternalLink className="h-4 w-4" />
+        <ChevronDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-max min-w-max">
+        {links.map((link) => {
+          const label =
+            link.location && link.location.trim().length > 0
+              ? `${formatSiteName(link.site)} (${link.location})`
+              : formatSiteName(link.site);
+
+          return (
+            <DropdownMenuItem key={`${link.site}-${link.url}`}>
+              <a href={link.url} target="_blank" rel="noopener noreferrer" className="w-full">
+                {label}
+              </a>
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+const markdownComponents: Components = {
+  h1: ({ children, ...props }) => (
+    <h4 className="mt-6 text-xl font-heading font-regular leading-tight tracking-tight first:mt-0" {...props}>
+      {children}
+    </h4>
+  ),
+  h2: ({ children, ...props }) => (
+    <h5 className="mt-5 text-lg font-heading font-regular leading-tight tracking-tight first:mt-0" {...props}>
+      {children}
+    </h5>
+  ),
+  h3: ({ children, ...props }) => (
+    <h6 className="mt-4 text-base font-heading font-medium leading-tight tracking-tight first:mt-0" {...props}>
+      {children}
+    </h6>
+  ),
+  h4: ({ children, ...props }) => (
+    <h6 className="mt-4 text-base font-heading font-medium leading-tight tracking-tight first:mt-0" {...props}>
+      {children}
+    </h6>
+  ),
+  h5: ({ children, ...props }) => (
+    <h6 className="mt-4 text-base font-heading font-medium leading-tight tracking-tight first:mt-0" {...props}>
+      {children}
+    </h6>
+  ),
+  h6: ({ children, ...props }) => (
+    <h6 className="mt-4 text-base font-heading font-medium leading-tight tracking-tight first:mt-0" {...props}>
+      {children}
+    </h6>
+  ),
+  p: ({ children, ...props }) => (
+    <p className="my-0 leading-relaxed text-foreground/95 first:mt-0 mb-6 font-light" {...props}>
+      {children}
+    </p>
+  ),
+  ul: ({ children, ...props }) => (
+    <ul className="my-4 list-disc space-y-2 pl-6 leading-7 text-foreground/95 font-light" {...props}>
+      {children}
+    </ul>
+  ),
+  ol: ({ children, ...props }) => (
+    <ol className="my-4 list-decimal space-y-2 pl-6 leading-7 text-foreground/95 font-light" {...props}>
+      {children}
+    </ol>
+  ),
+  li: ({ children, ...props }) => (
+    <li className="leading-7 font-light" {...props}>
+      {children}
+    </li>
+  ),
+  strong: ({ children, ...props }) => (
+    <strong className="font-semibold text-foreground" {...props}>
+      {children}
+    </strong>
+  ),
+  em: ({ children, ...props }) => (
+    <em className="italic text-foreground/95" {...props}>
+      {children}
+    </em>
+  ),
+  blockquote: ({ children, ...props }) => (
+    <blockquote className="my-4 border-l-4 border-border pl-4 italic text-foreground/80" {...props}>
+      {children}
+    </blockquote>
+  ),
+  code: ({ children, className, ...props }) => {
+    const isBlock = Boolean(className);
+
+    if (isBlock) {
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    }
+
+    return (
+      <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.92em] text-foreground" {...props}>
+        {children}
+      </code>
+    );
+  },
+  pre: ({ children, ...props }) => (
+    <pre className="my-4 overflow-x-auto rounded-2xl bg-muted p-4 text-sm leading-6 text-foreground" {...props}>
+      {children}
+    </pre>
+  ),
+  a: ({ children, ...props }) => (
+    <a className="font-medium underline underline-offset-4 hover:opacity-80" {...props}>
+      {children}
+    </a>
+  ),
+  hr: ({ ...props }) => <hr className="my-6 border-border" {...props} />,
+  table: ({ children, ...props }) => (
+    <div className="my-4 overflow-x-auto">
+      <table className="w-full border-collapse text-sm" {...props}>
+        {children}
+      </table>
+    </div>
+  ),
+  thead: ({ children, ...props }) => <thead className="bg-muted/70" {...props}>{children}</thead>,
+  tbody: ({ children, ...props }) => <tbody {...props}>{children}</tbody>,
+  tr: ({ children, ...props }) => <tr className="border-b border-border last:border-b-0" {...props}>{children}</tr>,
+  th: ({ children, ...props }) => (
+    <th className="border border-border px-3 py-2 text-left font-semibold text-foreground" {...props}>
+      {children}
+    </th>
+  ),
+  td: ({ children, ...props }) => (
+    <td className="border border-border px-3 py-2 align-top text-foreground/95" {...props}>
+      {children}
+    </td>
+  ),
+};
+
+function JobDescriptionMarkdown({ content }: { content: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {content}
+    </ReactMarkdown>
+  );
+}
+
 function JobTitleCell({
   title,
-  links,
+  onOpen,
   showNewIndicator,
 }: {
   title: string;
-  links: JobLink[];
+  onOpen: () => void;
   showNewIndicator: boolean;
 }) {
-  // Detect duplicate site names so we can show per-link location disambiguators
-  const siteCounts = links.reduce<Record<string, number>>((acc, l) => {
-    acc[l.site] = (acc[l.site] ?? 0) + 1;
-    return acc;
-  }, {});
-
-  const labelledLinks = links.map((link) => {
-    const label =
-      siteCounts[link.site]! > 1 && link.location
-        ? `${formatSiteName(link.site)} (${link.location})`
-        : formatSiteName(link.site);
-    return { ...link, label };
-  });
-
-  const primaryLink = labelledLinks[0];
-  const extraLinks = labelledLinks.slice(1);
-
   return (
     <div className="flex w-full min-w-0 items-center gap-2">
-      {primaryLink ? (
-        <a
-          href={primaryLink.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="truncate underline hover:opacity-80"
-          title={title}
-        >
-          {title}
-        </a>
-      ) : (
-        <span className="truncate" title={title}>{title}</span>
-      )}
+      <button
+        type="button"
+        onClick={onOpen}
+        className="truncate text-left underline hover:opacity-80"
+        title={title}
+      >
+        {title}
+      </button>
 
       {showNewIndicator && <span className="h-[6px] w-[6px] shrink-0 rounded-full bg-[#D74343]" aria-hidden="true" />}
-
-      {extraLinks.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:bg-muted"
-          >
-            <Link2 className="h-3 w-3" />
-            {extraLinks.length + 1}
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-max min-w-max">
-            {labelledLinks.map((link) => (
-              <DropdownMenuItem key={link.url}>
-                <a href={link.url} target="_blank" rel="noopener noreferrer" className="w-full">
-                  {link.label}
-                </a>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
     </div>
   );
 }
@@ -244,18 +444,20 @@ function JobTitleCell({
 function JobStatusCell({
   status,
   onChange,
+  forceWhite,
 }: {
   status: JobStatus;
   onChange: (status: JobStatus) => void;
+  forceWhite?: boolean;
 }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="group inline-flex items-center gap-1 cursor-pointer font-semibold hover:opacity-80 transition-opacity"
-        style={statusTextColor(status)}
+        className={`group inline-flex items-center gap-1 cursor-pointer font-semibold hover:opacity-80 transition-opacity ${forceWhite ? "text-white" : ""}`}
+        style={forceWhite ? undefined : statusTextColor(status)}
       >
         {status}
-        <ChevronDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <ChevronDown className={`h-4 w-4 ${forceWhite ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
         {STATUS_OPTIONS.map((option) => (
@@ -307,6 +509,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingAll, setRefreshingAll] = useState(false);
+  const [selectedJob, setSelectedJob] = useState<JobSelection | null>(null);
 
   const loadSearches = useCallback(async (forceRefresh: boolean) => {
     const response = await fetch(`/api/searches${forceRefresh ? "?forceRefresh=true" : ""}`, {
@@ -373,6 +576,37 @@ export default function Home() {
 
     return newest > 0 ? new Date(newest).toLocaleString() : null;
   }, [searches]);
+
+  const selectedJobRow = useMemo(() => {
+    if (!selectedJob) {
+      return null;
+    }
+
+    const selectedSearch = searches.find((search) => search.slug === selectedJob.searchSlug);
+    if (!selectedSearch) {
+      return null;
+    }
+
+    return (
+      selectedSearch.results.find((row) => getStatusKey(row) === selectedJob.statusKey) ?? null
+    );
+  }, [searches, selectedJob]);
+
+  const selectedJobLinks = useMemo<JobLink[]>(() => {
+    if (!selectedJobRow) {
+      return [];
+    }
+
+    if (isJobLinkArray(selectedJobRow["job_url"])) {
+      return selectedJobRow["job_url"];
+    }
+
+    if (selectedJobRow["job_url"]) {
+      return [{ site: "view", url: String(selectedJobRow["job_url"]) }];
+    }
+
+    return [];
+  }, [selectedJobRow]);
 
   const refreshAll = async () => {
     try {
@@ -470,21 +704,21 @@ export default function Home() {
   return (
     <main id="dashboard-root" className="flex h-screen flex-col overflow-hidden bg-card">
       <Tabs id="dashboard-tabs" value={resolvedActiveTab} onValueChange={setActiveTab} className="flex h-screen flex-col gap-0 overflow-hidden">
-        <section id="dashboard-header" className="bg-secondary text-secondary-foreground">
+        <section id="dashboard-header" className="bg-primary text-primary-foreground">
           <div id="dashboard-header-inner" className="mx-auto max-w-[1280px] px-8 pt-8 pb-4">
-            <div id="dashboard-title-row" className="mb-6 flex items-center justify-between gap-3">
+            <div id="dashboard-title-row" className="mb-4 flex items-center justify-between gap-3">
               <h1 id="dashboard-title" className="font-heading text-6xl leading-none tracking-tight">jobbity.</h1>
             </div>
 
             <div id="dashboard-tab-bar" className="flex w-full items-center gap-3">
               <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden whitespace-nowrap">
-                <TabsList id="dashboard-tab-list" className="h-[36px] w-fit min-w-max justify-start bg-transparent p-[3px]">
+                <TabsList id="dashboard-tab-list" className="h-[36px] w-fit min-w-max justify-start bg-muted p-[3px]">
                   {searches.map((search) => (
                     <TabsTrigger
                       id={`tab-trigger-${search.slug}`}
                       key={search.slug}
                       value={search.slug}
-                      className="!flex-none h-[29px] rounded-full px-4 py-1 text-sm font-medium text-secondary-foreground/95 data-active:bg-primary data-active:text-primary-foreground"
+                      className="!flex-none h-[29px] rounded-full px-4 py-1 text-sm font-medium text-foreground/70 hover:bg-accent hover:text-secondary-foreground data-active:bg-background data-active:text-foreground"
                     >
                       {search.title} ({search.resultCount})
                     </TabsTrigger>
@@ -573,13 +807,16 @@ export default function Home() {
                                       {column === "title" ? (
                                         <JobTitleCell
                                           title={String(row["title"] ?? "")}
-                                          links={
-                                            isJobLinkArray(row["job_url"])
-                                              ? row["job_url"]
-                                              : row["job_url"]
-                                              ? [{ site: "view", url: String(row["job_url"]) }]
-                                              : []
-                                          }
+                                          onOpen={() => {
+                                            const statusKey = getStatusKey(row);
+
+                                            if (!statusKey) {
+                                              setError("Unable to open details for this row.");
+                                              return;
+                                            }
+
+                                            setSelectedJob({ searchSlug: search.slug, statusKey });
+                                          }}
                                           showNewIndicator={String(row["job_status"] ?? "").trim().toLowerCase() === "new"}
                                         />
                                       ) : column === "date_posted" ? (
@@ -592,11 +829,7 @@ export default function Home() {
                                         <IndustryCell
                                           industry={String(row["industry_label"] ?? "")}
                                           onChange={(nextIndustry) => {
-                                            const statusKey = String(
-                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
-                                            )
-                                              .trim()
-                                              .toLowerCase();
+                                            const statusKey = getStatusKey(row);
 
                                             if (!statusKey) {
                                               setError("Unable to update industry for this row.");
@@ -612,11 +845,7 @@ export default function Home() {
                                         <JobStatusCell
                                           status={toJobStatus(row["job_status"])}
                                           onChange={(nextStatus) => {
-                                            const statusKey = String(
-                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
-                                            )
-                                              .trim()
-                                              .toLowerCase();
+                                            const statusKey = getStatusKey(row);
 
                                             if (!statusKey) {
                                               setError("Unable to update status for this row.");
@@ -647,6 +876,89 @@ export default function Home() {
             {!activeSearch ? <p id="dashboard-no-searches" className="px-6 py-3 text-sm text-muted-foreground">No searches available.</p> : null}
           </div>
         </section>
+
+        <aside
+          aria-hidden={!selectedJobRow}
+          className={`fixed inset-y-0 right-0 z-40 w-[480px] max-w-full transform transition-transform duration-300 ease-out ${
+            selectedJobRow ? "translate-x-0" : "translate-x-full"
+          }`}
+        >
+          <div className="flex h-full flex-col border-l border-border shadow-2xl">
+            <header className="flex shrink-0 flex-col gap-4 bg-secondary p-4 text-secondary-foreground">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <h3 className="truncate text-xl font-sans font-regular leading-none">
+                    {selectedJobRow ? toDisplayValue(selectedJobRow["company"]) : ""}
+                  </h3>
+                  <h2 className="text-4xl font-heading font-regular leading-none">
+                    {selectedJobRow ? toDisplayValue(selectedJobRow["title"]) : ""}
+                  </h2>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedJob(null)}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full text-secondary-foreground/90 hover:bg-white/10 hover:text-secondary-foreground"
+                  aria-label="Close job details"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="text-sm flex items-center justify-between gap-4 text-base leading-none">
+                <div className="min-w-0 flex items-center gap-2 text-secondary-foreground/95">
+                  {selectedJobRow && formatPostingDate(selectedJobRow["date_posted"]) ? (
+                    <>
+                      <span className="truncate">{formatPostingDate(selectedJobRow["date_posted"])}</span>
+                      <span className="h-[2px] w-[2px] shrink-0 rounded-full bg-sidebar-foreground" aria-hidden="true" />
+                    </>
+                  ) : null}
+                  <span className="truncate">{selectedJobRow ? deriveWorkMode(selectedJobRow) : "-"}</span>
+                  <span className="h-[2px] w-[2px] shrink-0 rounded-full bg-sidebar-foreground" aria-hidden="true" />
+                  <span className="truncate">{selectedJobRow ? toDisplayValue(selectedJobRow["location"]) : "-"}</span>
+                </div>
+
+                <div className="flex shrink-0 items-center gap-4">
+                  {selectedJobRow ? (
+                    <JobStatusCell
+                      status={toJobStatus(selectedJobRow["job_status"])}
+                      forceWhite
+                      onChange={(nextStatus) => {
+                        if (!selectedJob) {
+                          return;
+                        }
+
+                        void updateJobStatus(selectedJob.statusKey, nextStatus);
+                      }}
+                    />
+                  ) : null}
+                  <JobApplyAction links={selectedJobLinks} />
+                </div>
+              </div>
+            </header>
+
+            <div className="min-h-0 flex-1 overflow-y-auto bg-background p-4 text-foreground">
+              {selectedJobRow ? (
+                <div className="space-y-4 text-base leading-relaxed">
+                  {String(selectedJobRow["description"] ?? "").trim().length > 0
+                    ? (
+                        <JobDescriptionMarkdown content={String(selectedJobRow["description"])} />
+                      )
+                    : "No description available for this role."}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </aside>
+
+        {selectedJobRow ? (
+          <button
+            type="button"
+            onClick={() => setSelectedJob(null)}
+            className="fixed inset-0 z-30 bg-black/25"
+            aria-label="Close job details panel"
+          />
+        ) : null}
       </Tabs>
     </main>
   );
