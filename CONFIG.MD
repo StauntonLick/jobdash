@@ -53,5 +53,6 @@ Companies in this list will be excluded:
 - DataAnnotation
 - Prolific
 - Crossing Hurdles
+- Mercor
 - Rockstar Games
 

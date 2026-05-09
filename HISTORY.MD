@@ -170,4 +170,38 @@ This file is a dated running history of project changes and key decisions discus
 - During later comparison passes, Figma MCP screenshot calls hit plan rate limits; validation continued using previously fetched design context plus live browser snapshots.
 - Final workflow decision for this session: pause automatic pixel-tuning and hand off spacing polish for manual adjustment, with exact file/line guidance provided for editing.
 
+### Manual dashboard polish, local font integration, and table refinements
+
+- Added stable `id` attributes across the main dashboard layout in `dashboard/src/app/page.tsx` to make header, tabs, content, and per-search table sections easier to inspect manually in browser devtools.
+- Investigated Tailwind inspector behavior and confirmed the app only serves generated utilities that appear in source files; manual Firefox inspector class edits do not work for utilities that have not been compiled.
+- Refined the dashboard height/scroll layout so the results area becomes the primary scroll region instead of the full page, and removed the shared table wrapper's extra overflow container so sticky header behavior can work against the intended scroll viewport.
+- Updated shared UI styling for the latest design pass:
+  - Inactive tab hover state now uses the primary color in `dashboard/src/components/ui/tabs.tsx`.
+  - Table rows no longer show hover/selected state styling in `dashboard/src/components/ui/table.tsx`.
+  - Status color mapping in `dashboard/src/app/page.tsx` now uses `#172542` for `New` and `#C7C3BE` for `Skipped`, with other status colors unchanged.
+- Switched typography to `Poppins` for body text and a local `Rubik One` font for headings:
+  - Added `dashboard/src/app/fonts/RubikOne-Regular.ttf` and loaded it with `next/font/local` in `dashboard/src/app/layout.tsx`.
+  - Updated `dashboard/src/app/globals.css` font variables so `font-sans` resolves to `Poppins` and `font-heading` resolves to the local Rubik One font.
+  - Decision: serve Rubik One locally because it is not available in Google Fonts, instead of approximating it with a different hosted family.
+- Reworked header controls in `dashboard/src/app/page.tsx`:
+  - Moved the refresh button onto the same row as the tab bar and aligned it to the right.
+  - Removed the visible `Last updated` label and exposed it as the button's hover tooltip.
+  - Shortened the button label to `Refresh`.
+  - Changed the refresh button background to white at 20% opacity.
+- Tightened results-table structure and content presentation in `dashboard/src/app/page.tsx`:
+  - Removed the `location` column from the visible results table.
+  - Increased the `title` column width/max-width from `240px` to `480px`.
+  - Constrained the `company` column to `240px` max-width and added truncation with ellipsis plus hover title text.
+  - Applied `font-bold` to the status dropdown trigger in the status column.
+
+  ## 2026-05-09
+
+  ### Results table UX cleanup
+
+  - Added a 6px white circular indicator to the right of job titles for rows whose status is `New` in `dashboard/src/app/page.tsx`.
+  - Decision: keep the new-job marker lightweight and inline with the title so it reads as a subtle status cue rather than a separate badge.
+  - Removed sticky header behavior from the results table and made the header static.
+  - Moved scrolling so only the `search-results-body` section scrolls, preventing the scrollbar from running behind the header.
+  - Decision: preserve header/body column alignment with a split static-header + scrollable-body table layout instead of relying on sticky positioning.
+
 

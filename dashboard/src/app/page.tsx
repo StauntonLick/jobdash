@@ -35,7 +35,7 @@ type SearchData = {
 const STATUS_OPTIONS = ["New", "Skipped", "Applied", "Shortlist", "Longlist"] as const;
 type JobStatus = (typeof STATUS_OPTIONS)[number];
 
-const VISIBLE_COLUMNS = ["title", "company", "location", "industry", "salary", "date_posted", "status"] as const;
+const VISIBLE_COLUMNS = ["title", "company", "industry", "salary", "date_posted", "status"] as const;
 
 type JobLink = {
   site: string;
@@ -55,7 +55,7 @@ function toJobStatus(value: unknown): JobStatus {
 function statusTextColor(status: JobStatus): { color: string } {
   switch (status) {
     case "Skipped":
-      return { color: "#A8A794" };
+      return { color: "#C7C3BE" };
     case "Applied":
       return { color: "#1AAB32" };
     case "Shortlist":
@@ -177,9 +177,11 @@ function formatSiteName(site: string): string {
 function JobTitleCell({
   title,
   links,
+  showNewIndicator,
 }: {
   title: string;
   links: JobLink[];
+  showNewIndicator: boolean;
 }) {
   // Detect duplicate site names so we can show per-link location disambiguators
   const siteCounts = links.reduce<Record<string, number>>((acc, l) => {
@@ -214,6 +216,8 @@ function JobTitleCell({
         <span className="truncate" title={title}>{title}</span>
       )}
 
+      {showNewIndicator && <span className="h-[6px] w-[6px] shrink-0 rounded-full bg-[#D74343]" aria-hidden="true" />}
+
       {extraLinks.length > 0 && (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -247,7 +251,7 @@ function JobStatusCell({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="group inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+        className="group inline-flex items-center gap-1 cursor-pointer font-semibold hover:opacity-80 transition-opacity"
         style={statusTextColor(status)}
       >
         {status}
@@ -464,60 +468,63 @@ export default function Home() {
   }
 
   return (
-    <main className="flex min-h-screen flex-col bg-card">
-      <Tabs value={resolvedActiveTab} onValueChange={setActiveTab} className="flex min-h-screen flex-col gap-0">
-        <section className="bg-secondary text-secondary-foreground">
-          <div className="mx-auto max-w-[1280px] px-24 pt-24 pb-16">
-            <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-              <h1 className="text-6xl font-black leading-none tracking-tight">jobbity.</h1>
-
-              <div className="flex items-center gap-2.5">
-                <p className="text-sm text-secondary-foreground/95">Last updated: {globalLastUpdated ?? "-"}</p>
-                <Button
-                  onClick={() => void refreshAll()}
-                  disabled={refreshingAll}
-                  size="sm"
-                  className="h-9 rounded-full bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
-                >
-                  <RotateCw className={`mr-2 h-4 w-4 ${refreshingAll ? "animate-spin" : ""}`} />
-                  Refresh All
-                </Button>
-              </div>
+    <main id="dashboard-root" className="flex h-screen flex-col overflow-hidden bg-card">
+      <Tabs id="dashboard-tabs" value={resolvedActiveTab} onValueChange={setActiveTab} className="flex h-screen flex-col gap-0 overflow-hidden">
+        <section id="dashboard-header" className="bg-secondary text-secondary-foreground">
+          <div id="dashboard-header-inner" className="mx-auto max-w-[1280px] px-8 pt-8 pb-4">
+            <div id="dashboard-title-row" className="mb-6 flex items-center justify-between gap-3">
+              <h1 id="dashboard-title" className="font-heading text-6xl leading-none tracking-tight">jobbity.</h1>
             </div>
 
-            <div className="w-full overflow-x-auto overflow-y-hidden whitespace-nowrap">
-              <TabsList className="h-[36px] w-fit min-w-max justify-start bg-transparent p-[3px]">
-                {searches.map((search) => (
-                  <TabsTrigger
-                    key={search.slug}
-                    value={search.slug}
-                    className="!flex-none h-[29px] rounded-full px-4 py-1 text-sm font-medium text-secondary-foreground/95 data-active:bg-primary data-active:text-primary-foreground"
-                  >
-                    {search.title} ({search.resultCount})
-                  </TabsTrigger>
-                ))}
-              </TabsList>
+            <div id="dashboard-tab-bar" className="flex w-full items-center gap-3">
+              <div className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden whitespace-nowrap">
+                <TabsList id="dashboard-tab-list" className="h-[36px] w-fit min-w-max justify-start bg-transparent p-[3px]">
+                  {searches.map((search) => (
+                    <TabsTrigger
+                      id={`tab-trigger-${search.slug}`}
+                      key={search.slug}
+                      value={search.slug}
+                      className="!flex-none h-[29px] rounded-full px-4 py-1 text-sm font-medium text-secondary-foreground/95 data-active:bg-primary data-active:text-primary-foreground"
+                    >
+                      {search.title} ({search.resultCount})
+                    </TabsTrigger>
+                  ))}
+                </TabsList>
+              </div>
+
+              <Button
+                id="refresh-all-button"
+                onClick={() => void refreshAll()}
+                disabled={refreshingAll}
+                size="sm"
+                title={`Last updated: ${globalLastUpdated ?? "-"}`}
+                className="h-9 shrink-0 rounded-full bg-white/20 px-4 text-sm font-semibold text-primary-foreground hover:bg-white/30"
+              >
+                <RotateCw className={`mr-2 h-4 w-4 ${refreshingAll ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
             </div>
           </div>
         </section>
 
-        <section className="flex min-h-0 flex-1 bg-card">
-          <div className="mx-auto flex h-full w-full max-w-[1280px] flex-col">
+        <section id="dashboard-content" className="flex min-h-0 flex-1 overflow-hidden bg-card">
+          <div id="dashboard-content-inner" className="mx-auto flex min-h-0 w-full max-w-[1280px] flex-1 flex-col overflow-hidden">
             {searches.map((search) => (
               <TabsContent
+                id={`search-panel-${search.slug}`}
                 key={search.slug}
                 value={search.slug}
-                className="flex h-full min-h-0 flex-1 flex-col px-6 pb-6 pt-8 text-card-foreground"
+                className="flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pb-6 pt-4 text-card-foreground"
               >
-                <ScrollArea className="min-h-0 flex-1 w-full">
+                <div id={`search-results-wrap-${search.slug}`} className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
                   <div className="min-w-[1100px]">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="border-b border-[#17254214]">
+                    <Table id={`search-results-table-${search.slug}`} className="table-fixed">
+                      <TableHeader id={`search-results-header-${search.slug}`}>
+                        <TableRow id={`search-results-header-row-${search.slug}`} className="border-b border-[#17254214]">
                           {VISIBLE_COLUMNS.map((column) => (
                             <TableHead
                               key={column}
-                              className={column === "title" ? "h-10 w-[240px] max-w-[240px] px-2 text-sm font-bold capitalize text-[#18727A]" : "h-10 px-2 text-sm font-bold capitalize text-[#18727A]"}
+                              className={column === "title" ? "h-10 w-[480px] max-w-[480px] bg-card px-2 text-sm font-bold capitalize text-[#18727A]" : column === "company" ? "h-10 w-[240px] max-w-[240px] bg-card px-2 text-sm font-bold capitalize text-[#18727A]" : "h-10 bg-card px-2 text-sm font-bold capitalize text-[#18727A]"}
                             >
                               {column === "date_posted"
                                 ? "Age"
@@ -532,100 +539,112 @@ export default function Home() {
                           ))}
                         </TableRow>
                       </TableHeader>
-                      <TableBody>
-                        {search.results.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={VISIBLE_COLUMNS.length} className="px-2 text-sm text-card-foreground">
-                              No jobs found for this search.
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          [...search.results]
-                            .sort((a, b) => {
-                              const da = a["date_posted"]
-                                ? new Date(String(a["date_posted"])).getTime()
-                                : 0;
-                              const db = b["date_posted"]
-                                ? new Date(String(b["date_posted"])).getTime()
-                                : 0;
-                              return db - da;
-                            })
-                            .map((row, index) => (
-                              <TableRow key={`${search.slug}-${index}`} className="border-b border-[#17254214] hover:bg-card/95">
-                                {VISIBLE_COLUMNS.map((column) => (
-                                  <TableCell
-                                    key={`${search.slug}-${index}-${column}`}
-                                    className={column === "title" ? "h-[37px] w-[240px] max-w-[240px] px-2 text-sm text-card-foreground" : "h-[37px] px-2 text-sm text-card-foreground"}
-                                  >
-                                    {column === "title" ? (
-                                      <JobTitleCell
-                                        title={String(row["title"] ?? "")}
-                                        links={
-                                          isJobLinkArray(row["job_url"])
-                                            ? row["job_url"]
-                                            : row["job_url"]
-                                            ? [{ site: "view", url: String(row["job_url"]) }]
-                                            : []
-                                        }
-                                      />
-                                    ) : column === "date_posted" ? (
-                                      formatAge(row[column])
-                                    ) : column === "industry" ? (
-                                      <IndustryCell
-                                        industry={String(row["industry_label"] ?? "")}
-                                        onChange={(nextIndustry) => {
-                                          const statusKey = String(
-                                            row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
-                                          )
-                                            .trim()
-                                            .toLowerCase();
-
-                                          if (!statusKey) {
-                                            setError("Unable to update industry for this row.");
-                                            return;
-                                          }
-
-                                          void updateJobIndustry(statusKey, nextIndustry);
-                                        }}
-                                      />
-                                    ) : column === "salary" ? (
-                                      formatSalary(row)
-                                    ) : column === "status" ? (
-                                      <JobStatusCell
-                                        status={toJobStatus(row["job_status"])}
-                                        onChange={(nextStatus) => {
-                                          const statusKey = String(
-                                            row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
-                                          )
-                                            .trim()
-                                            .toLowerCase();
-
-                                          if (!statusKey) {
-                                            setError("Unable to update status for this row.");
-                                            return;
-                                          }
-
-                                          void updateJobStatus(statusKey, nextStatus);
-                                        }}
-                                      />
-                                    ) : (
-                                      toDisplayValue(row[column])
-                                    )}
-                                  </TableCell>
-                                ))}
-                              </TableRow>
-                            ))
-                        )}
-                      </TableBody>
                     </Table>
                   </div>
-                </ScrollArea>
 
-                {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+                  <ScrollArea id={`search-results-body-scroll-${search.slug}`} className="min-h-0 flex-1 w-full overflow-hidden">
+                    <div className="min-w-[1100px]">
+                      <Table id={`search-results-body-table-${search.slug}`} className="table-fixed">
+                        <TableBody id={`search-results-body-${search.slug}`}>
+                          {search.results.length === 0 ? (
+                            <TableRow id={`search-results-empty-row-${search.slug}`}>
+                              <TableCell colSpan={VISIBLE_COLUMNS.length} className="px-2 text-sm text-card-foreground">
+                                No jobs found for this search.
+                              </TableCell>
+                            </TableRow>
+                          ) : (
+                            [...search.results]
+                              .sort((a, b) => {
+                                const da = a["date_posted"]
+                                  ? new Date(String(a["date_posted"])).getTime()
+                                  : 0;
+                                const db = b["date_posted"]
+                                  ? new Date(String(b["date_posted"])).getTime()
+                                  : 0;
+                                return db - da;
+                              })
+                              .map((row, index) => (
+                                <TableRow id={`search-result-row-${search.slug}-${index}`} key={`${search.slug}-${index}`} className="border-b border-[#17254214] hover:bg-card/95">
+                                  {VISIBLE_COLUMNS.map((column) => (
+                                    <TableCell
+                                      key={`${search.slug}-${index}-${column}`}
+                                      className={column === "title" ? "h-[37px] w-[480px] max-w-[480px] px-2 text-sm text-card-foreground" : column === "company" ? "h-[37px] w-[240px] max-w-[240px] px-2 text-sm text-card-foreground" : "h-[37px] px-2 text-sm text-card-foreground"}
+                                    >
+                                      {column === "title" ? (
+                                        <JobTitleCell
+                                          title={String(row["title"] ?? "")}
+                                          links={
+                                            isJobLinkArray(row["job_url"])
+                                              ? row["job_url"]
+                                              : row["job_url"]
+                                              ? [{ site: "view", url: String(row["job_url"]) }]
+                                              : []
+                                          }
+                                          showNewIndicator={String(row["job_status"] ?? "").trim().toLowerCase() === "new"}
+                                        />
+                                      ) : column === "date_posted" ? (
+                                        formatAge(row[column])
+                                      ) : column === "company" ? (
+                                        <span className="block truncate" title={toDisplayValue(row[column])}>
+                                          {toDisplayValue(row[column])}
+                                        </span>
+                                      ) : column === "industry" ? (
+                                        <IndustryCell
+                                          industry={String(row["industry_label"] ?? "")}
+                                          onChange={(nextIndustry) => {
+                                            const statusKey = String(
+                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
+                                            )
+                                              .trim()
+                                              .toLowerCase();
+
+                                            if (!statusKey) {
+                                              setError("Unable to update industry for this row.");
+                                              return;
+                                            }
+
+                                            void updateJobIndustry(statusKey, nextIndustry);
+                                          }}
+                                        />
+                                      ) : column === "salary" ? (
+                                        formatSalary(row)
+                                      ) : column === "status" ? (
+                                        <JobStatusCell
+                                          status={toJobStatus(row["job_status"])}
+                                          onChange={(nextStatus) => {
+                                            const statusKey = String(
+                                              row["status_key"] ?? `${row["title"] ?? ""}::${row["company"] ?? ""}`
+                                            )
+                                              .trim()
+                                              .toLowerCase();
+
+                                            if (!statusKey) {
+                                              setError("Unable to update status for this row.");
+                                              return;
+                                            }
+
+                                            void updateJobStatus(statusKey, nextStatus);
+                                          }}
+                                        />
+                                      ) : (
+                                        toDisplayValue(row[column])
+                                      )}
+                                    </TableCell>
+                                  ))}
+                                </TableRow>
+                              ))
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </ScrollArea>
+                </div>
+
+                {error ? <p id={`search-error-${search.slug}`} className="mt-3 text-sm text-destructive">{error}</p> : null}
               </TabsContent>
             ))}
 
-            {!activeSearch ? <p className="px-6 py-3 text-sm text-muted-foreground">No searches available.</p> : null}
+            {!activeSearch ? <p id="dashboard-no-searches" className="px-6 py-3 text-sm text-muted-foreground">No searches available.</p> : null}
           </div>
         </section>
       </Tabs>
