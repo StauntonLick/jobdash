@@ -2,6 +2,10 @@
 
 This file is a dated running history of project changes and key decisions discussed in the repository.
 
+## 2026-05-11
+
+- Updated the sidebar job-details header in `dashboard/src/app/page.tsx` to truncate displayed location values at the first comma (for example, `Livingston, Scotland` now displays as `Livingston`).
+
 ## 2026-05-09
 
 - Restored `linkedin_fetch_description=True` in `CONFIG.MD` so LinkedIn listings fetch full descriptions again in the sidebar.

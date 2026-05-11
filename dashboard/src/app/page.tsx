@@ -90,6 +90,11 @@ function toDisplayValue(value: unknown): string {
   return String(value);
 }
 
+function truncateAtFirstComma(value: string): string {
+  const commaIndex = value.indexOf(",");
+  return (commaIndex === -1 ? value : value.slice(0, commaIndex)).trim();
+}
+
 function isJobLinkArray(value: unknown): value is JobLink[] {
   return (
     Array.isArray(value) &&
@@ -915,7 +920,9 @@ export default function Home() {
                   ) : null}
                   <span className="truncate">{selectedJobRow ? deriveWorkMode(selectedJobRow) : "-"}</span>
                   <span className="h-[2px] w-[2px] shrink-0 rounded-full bg-sidebar-foreground" aria-hidden="true" />
-                  <span className="truncate">{selectedJobRow ? toDisplayValue(selectedJobRow["location"]) : "-"}</span>
+                  <span className="truncate">
+                    {selectedJobRow ? truncateAtFirstComma(toDisplayValue(selectedJobRow["location"])) : "-"}
+                  </span>
                 </div>
 
                 <div className="flex shrink-0 items-center gap-4">
