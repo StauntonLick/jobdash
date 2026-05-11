@@ -7,6 +7,7 @@ This file is a dated running history of project changes and key decisions discus
 - Separated dev and production server ports: dev server runs on port 3000 (default `next dev`), production server (pm2) now runs on port 3001 via a new `start:prod` script in `package.json`. pm2 was re-registered to use `npm run start:prod`. Updated `next.config.ts` to add `100.*.*.*` to `allowedDevOrigins` so Tailscale-connected devices can access the dev server without being blocked by Next.js's cross-origin protection.
 - Updated the sidebar job-details header in `dashboard/src/app/page.tsx` to truncate displayed location values at the first comma (for example, `Livingston, Scotland` now displays as `Livingston`).
 - Set up pm2 to run the Next.js app as a persistent background service that auto-starts at login. The production build is served at `http://localhost:3000`. Use `pm2 stop jobdash` / `pm2 start jobdash` to control it, and rebuild with `npm run build` in `dashboard/` when you want the always-on version to reflect latest changes.
+- Added a mobile-specific result list in `dashboard/src/app/page.tsx` that replaces the data table on small screens (`md` breakpoint). Each entry is a two-column card: left side shows the job title (H3, primary colour) and a metadata row with company, industry, and age separated by 2 px dot separators; right side shows the status dropdown with its chevron permanently visible. The list has `p-4` padding and `my-2` dividers between entries. Tapping the title opens the sidebar as normal.
 
 ## 2026-05-09
 

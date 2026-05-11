@@ -450,10 +450,12 @@ function JobStatusCell({
   status,
   onChange,
   forceWhite,
+  permanentChevron,
 }: {
   status: JobStatus;
   onChange: (status: JobStatus) => void;
   forceWhite?: boolean;
+  permanentChevron?: boolean;
 }) {
   return (
     <DropdownMenu>
@@ -462,7 +464,8 @@ function JobStatusCell({
         style={forceWhite ? undefined : statusTextColor(status)}
       >
         {status}
-        <ChevronDown className={`h-4 w-4 ${forceWhite ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`} />
+        {/* Chevron is always visible when permanentChevron or forceWhite is set, otherwise fades in on hover */}
+        <ChevronDown className={`h-4 w-4 ${(forceWhite || permanentChevron) ? "" : "opacity-0 group-hover:opacity-100 transition-opacity"}`} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
         {STATUS_OPTIONS.map((option) => (
@@ -507,6 +510,95 @@ function IndustryCell({
   );
 }
 
+
+// Mobile-only card list – shown instead of the table on small screens
+function MobileJobList({
+  search,
+  onOpenJob,
+  onStatusChange,
+}: {
+  search: SearchData;
+  onOpenJob: (searchSlug: string, statusKey: string) => void;
+  onStatusChange: (statusKey: string, status: JobStatus) => void;
+}) {
+  const sortedResults = useMemo(
+    () =>
+      [...search.results].sort((a, b) => {
+        const da = a["date_posted"] ? new Date(String(a["date_posted"])).getTime() : 0;
+        const db = b["date_posted"] ? new Date(String(b["date_posted"])).getTime() : 0;
+        return db - da;
+      }),
+    [search.results]
+  );
+
+  if (sortedResults.length === 0) {
+    return (
+      <p className="p-4 text-sm text-muted-foreground">No jobs found for this search.</p>
+    );
+  }
+
+  return (
+    <ul id={`mobile-job-list-${search.slug}`} className="px-4 py-4">
+      {sortedResults.map((row, index) => {
+        const statusKey = getStatusKey(row);
+        const title = String(row["title"] ?? "");
+        const company = toDisplayValue(row["company"]);
+        const industry = String(row["industry_label"] ?? "") || "-";
+        const age = formatAge(row["date_posted"]);
+        const status = toJobStatus(row["job_status"]);
+
+        return (
+          <li key={`${search.slug}-mobile-${index}`} id={`mobile-job-entry-${search.slug}-${index}`}>
+            {/* Entry row: left info + right status button */}
+            <div className="flex items-center gap-3 py-1">
+
+              {/* Left section: title and metadata */}
+              <div className="min-w-0 flex-1">
+                <h3 className="font-heading text-base font-sans leading-tight text-primary">
+                  <button
+                    type="button"
+                    onClick={() => onOpenJob(search.slug, statusKey)}
+                    className="text-left"
+                  >
+                    {title}
+                  </button>
+                </h3>
+                {/* Company · Industry · Age row with dot separators – missing values are omitted */}
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                  {[company, industry, age]
+                    .filter((item) => item && item !== "-")
+                    .map((item, i, arr) => (
+                      <span key={item} className="inline-flex items-center gap-2">
+                        {item}
+                        {/* Dot separator after every item except the last */}
+                        {i < arr.length - 1 && (
+                          <span className="h-[2px] w-[2px] shrink-0 rounded-full bg-muted-foreground" aria-hidden="true" />
+                        )}
+                      </span>
+                    ))}
+                </div>
+              </div>
+
+              {/* Right section: status dropdown, chevron always visible */}
+              <div className="shrink-0 flex items-center">
+                <JobStatusCell
+                  status={status}
+                  permanentChevron
+                  onChange={(nextStatus) => onStatusChange(statusKey, nextStatus)}
+                />
+              </div>
+            </div>
+
+            {/* Divider between entries (not after the last one) */}
+            {index < sortedResults.length - 1 && (
+              <div className="my-2 border-t border-border" aria-hidden="true" />
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 export default function Home() {
   const [searches, setSearches] = useState<SearchData[]>([]);
@@ -710,7 +802,7 @@ export default function Home() {
     <main id="dashboard-root" className="flex h-screen flex-col overflow-hidden bg-card">
       <Tabs id="dashboard-tabs" value={resolvedActiveTab} onValueChange={setActiveTab} className="flex h-screen flex-col gap-0 overflow-hidden">
         <section id="dashboard-header" className="bg-primary text-primary-foreground">
-          <div id="dashboard-header-inner" className="mx-auto max-w-[1280px] px-8 pt-8 pb-4">
+          <div id="dashboard-header-inner" className="mx-auto max-w-[1280px] px-4 md:px-8 pt-8 pb-4">
             <div id="dashboard-title-row" className="mb-4 flex items-center justify-between gap-3">
               <h1 id="dashboard-title" className="font-heading text-6xl leading-none tracking-tight">jobbity.</h1>
             </div>
@@ -753,9 +845,10 @@ export default function Home() {
                 id={`search-panel-${search.slug}`}
                 key={search.slug}
                 value={search.slug}
-                className="flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pb-6 pt-4 text-card-foreground"
+                className="flex h-full min-h-0 flex-1 flex-col overflow-hidden text-card-foreground"
               >
-                <div id={`search-results-wrap-${search.slug}`} className="flex h-full min-h-0 flex-1 flex-col overflow-hidden">
+                {/* Desktop table view – hidden on mobile */}
+                <div id={`search-results-wrap-${search.slug}`} className="hidden md:flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pb-6 pt-4">
                   <div className="min-w-[1100px]">
                     <Table id={`search-results-table-${search.slug}`} className="table-fixed">
                       <TableHeader id={`search-results-header-${search.slug}`}>
@@ -874,7 +967,16 @@ export default function Home() {
                   </ScrollArea>
                 </div>
 
-                {error ? <p id={`search-error-${search.slug}`} className="mt-3 text-sm text-destructive">{error}</p> : null}
+                {/* Mobile card list – shown instead of the table on small screens */}
+                <div id={`mobile-results-wrap-${search.slug}`} className="md:hidden h-full min-h-0 flex-1 overflow-y-auto">
+                  <MobileJobList
+                    search={search}
+                    onOpenJob={(searchSlug, statusKey) => setSelectedJob({ searchSlug, statusKey })}
+                    onStatusChange={(statusKey, nextStatus) => void updateJobStatus(statusKey, nextStatus)}
+                  />
+                </div>
+
+                {error ? <p id={`search-error-${search.slug}`} className="px-4 md:px-0 mt-3 text-sm text-destructive">{error}</p> : null}
               </TabsContent>
             ))}
 
