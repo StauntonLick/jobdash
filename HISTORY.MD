@@ -2,6 +2,21 @@
 
 This file is a dated running history of project changes and key decisions discussed in the repository.
 
+## 2026-05-14
+
+- Adjusted the desktop filter-summary footer placement in `dashboard/src/app/page.tsx` so it is inside the table `ScrollArea` content (appears at the end of the table scroll) rather than outside the scroll container.
+- Added a per-search footer line under each desktop results table in `dashboard/src/app/page.tsx` showing `[y] jobs hidden by filters` (muted semantic color, italic body style), where `y = rawResultCount - resultCount`.
+- Updated `dashboard/src/lib/jobspy-service.ts` and `dashboard/src/app/page.tsx` so the refresh button hover hint now shows `Last updated dd/mm/yyyy. [x] jobs found, [y] after filters applied.` where `[x]` is the raw JobSpy total across searches/sites and `[y]` is the post-filter total shown in the dashboard.
+- Switched `linkedin_fetch_description` to `False` in `CONFIG.MD` so search refreshes no longer block on per-job LinkedIn description fetches.
+- Added a permanent job-description cache at `.cache/job-descriptions.json` in `dashboard/src/lib/jobspy-service.ts` and now hydrate result rows from that cache before returning data.
+- Added a background description queue in `dashboard/src/lib/jobspy-service.ts` that begins after JobDash filters/dedupe are applied, so only user-visible jobs are fetched and cached.
+- Added `dashboard/scripts/fetch_job_description.py` to fetch and parse job descriptions from job posting HTML by site selector with safe fallbacks.
+- Added `dashboard/src/app/api/job-descriptions/route.ts` for on-demand sidebar description requests; it reuses the same permanent cache and fetcher.
+- Updated `dashboard/src/app/page.tsx` sidebar behavior to fetch missing descriptions on open and show a centered muted loading spinner while the request is in progress.
+- Updated `dashboard/scripts/fetch_job_description.py` so Glassdoor descriptions are fetched via Glassdoor's GraphQL `JobDetailQuery` endpoint (matching JobSpy's full-description approach) instead of relying on teaser text from public page HTML metadata.
+- Updated `dashboard/scripts/fetch_job_description.py` so LinkedIn descriptions are extracted from `.show-more-less-html__markup`, converted to markdown, and returned with structural formatting preserved (matching JobSpy's markdown pipeline).
+- Cleared the persisted job description cache by resetting `dashboard/.cache/job-descriptions.json` to `{}` so stale truncated/plain descriptions are removed.
+
 ## 2026-05-11
 
 - Separated dev and production server ports: dev server runs on port 3000 (default `next dev`), production server (pm2) now runs on port 3001 via a new `start:prod` script in `package.json`. pm2 was re-registered to use `npm run start:prod`. Updated `next.config.ts` to add `100.*.*.*` to `allowedDevOrigins` so Tailscale-connected devices can access the dev server without being blocked by Next.js's cross-origin protection.

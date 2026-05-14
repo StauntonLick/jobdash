@@ -8,7 +8,7 @@ These are the basic parameters to be passed to JobSpy (the service that does the
 - results_wanted=60
 - hours_old=240 
 - country_indeed="UK"
-- linkedin_fetch_description=True
+- linkedin_fetch_description=False
 
 ## LOCATIONS
 ### In-Person/Hybrid/Remote
@@ -41,7 +41,6 @@ Jobs with titles containing the following will be excluded:
 - Developer
 - Artist
 - Engineer
-- Content
 - Graphic
 - Brand
 - Product Manager
@@ -53,6 +52,7 @@ Jobs with titles containing the following will be excluded:
 Companies in this list will be excluded:
 - DataAnnotation
 - Prolific
+- DesignMeshAI
 - Crossing Hurdles
 - Mercor
 - Rockstar Games

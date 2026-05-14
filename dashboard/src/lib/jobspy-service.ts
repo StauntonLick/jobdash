@@ -10,6 +10,7 @@ export type SearchResult = {
   title: string;
   criteria: SearchDefinition["criteria"];
   results: Array<Record<string, unknown>>;
+  rawResultCount: number;
   resultCount: number;
   lastUpdated: string;
   error?: string;
@@ -32,7 +33,10 @@ const CACHE_DIR = path.resolve(process.cwd(), ".cache", "searches");
 const STATUS_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-statuses.json");
 const INDUSTRY_OVERRIDE_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-industry-overrides.json");
 const SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "run_jobspy_search.py");
+const DESCRIPTION_FETCH_SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "fetch_job_description.py");
+const DESCRIPTION_CACHE_PATH = path.resolve(process.cwd(), ".cache", "job-descriptions.json");
 const CACHE_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+const DESCRIPTION_FETCH_DELAY_MS = 500;
 const PYTHON_PATH_CANDIDATES = [
   process.env.JOBDASH_PYTHON,
   path.resolve(process.cwd(), "../venv/bin/python"),
@@ -44,6 +48,12 @@ const PYTHON_PATH_CANDIDATES = [
 ].filter((value): value is string => Boolean(value && value.trim()));
 
 let resolvedPythonPath: string | null = null;
+let descriptionCache: Record<string, string> | null = null;
+let descriptionCacheWrite: Promise<void> = Promise.resolve();
+let isDescriptionQueueRunning = false;
+const descriptionQueue: Array<{ site: string; url: string }> = [];
+const queuedDescriptionKeys = new Set<string>();
+const inFlightDescriptionFetches = new Map<string, Promise<string>>();
 
 export const JOB_STATUS_VALUES = ["New", "Skipped", "Applied", "Shortlist", "Longlist"] as const;
 export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
@@ -103,6 +113,12 @@ const LINKEDIN_REMOTE_HINTS = [
 
 async function ensureCacheDir(): Promise<void> {
   await fs.mkdir(CACHE_DIR, { recursive: true });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function isJobStatus(value: unknown): value is JobStatus {
@@ -259,6 +275,269 @@ async function resolvePythonPath(): Promise<string> {
       "Run ../scripts/setup-python.sh from the dashboard folder, or set JOBDASH_PYTHON to a Python executable with those packages installed.",
     ].join(" ")
   );
+}
+
+function normalizeDescriptionSite(site: unknown): string {
+  const normalized = String(site ?? "").trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+
+  if (normalized.includes(",")) {
+    return normalized
+      .split(",")
+      .map((value) => value.trim())
+      .find(Boolean) ?? "";
+  }
+
+  return normalized;
+}
+
+function buildDescriptionCacheKey(site: string, url: string): string {
+  return `${normalizeDescriptionSite(site)}::${String(url).trim()}`;
+}
+
+function extractPrimaryJobLink(row: Record<string, unknown>): { site: string; url: string } | null {
+  const links = row.job_url;
+  if (Array.isArray(links)) {
+    for (const entry of links) {
+      if (!entry || typeof entry !== "object") {
+        continue;
+      }
+
+      const site = normalizeDescriptionSite((entry as Record<string, unknown>).site);
+      const url = String((entry as Record<string, unknown>).url ?? "").trim();
+      if (site && url) {
+        return { site, url };
+      }
+    }
+  }
+
+  const fallbackUrl = String(row.job_url ?? "").trim();
+  const fallbackSite = normalizeDescriptionSite(row.site);
+  if (fallbackSite && fallbackUrl) {
+    return { site: fallbackSite, url: fallbackUrl };
+  }
+
+  return null;
+}
+
+async function readDescriptionCache(): Promise<Record<string, string>> {
+  if (descriptionCache) {
+    return descriptionCache;
+  }
+
+  try {
+    const content = await fs.readFile(DESCRIPTION_CACHE_PATH, "utf8");
+    const parsed = JSON.parse(content) as Record<string, unknown>;
+    const normalized: Record<string, string> = {};
+
+    for (const [key, value] of Object.entries(parsed)) {
+      const text = String(value ?? "").trim();
+      if (!text) {
+        continue;
+      }
+      normalized[key] = text;
+    }
+
+    descriptionCache = normalized;
+    return normalized;
+  } catch {
+    descriptionCache = {};
+    return descriptionCache;
+  }
+}
+
+async function writeDescriptionCache(): Promise<void> {
+  const current = await readDescriptionCache();
+  await ensureCacheDir();
+  await fs.writeFile(DESCRIPTION_CACHE_PATH, JSON.stringify(current, null, 2), "utf8");
+}
+
+function queueDescriptionCacheWrite(): void {
+  descriptionCacheWrite = descriptionCacheWrite
+    .then(() => writeDescriptionCache())
+    .catch(() => undefined);
+}
+
+async function getCachedDescription(site: string, url: string): Promise<string> {
+  const cache = await readDescriptionCache();
+  const key = buildDescriptionCacheKey(site, url);
+  return String(cache[key] ?? "");
+}
+
+async function setCachedDescription(site: string, url: string, description: string): Promise<void> {
+  const normalizedDescription = String(description ?? "").trim();
+  if (!normalizedDescription) {
+    return;
+  }
+
+  const cache = await readDescriptionCache();
+  const key = buildDescriptionCacheKey(site, url);
+  if (cache[key] === normalizedDescription) {
+    return;
+  }
+
+  cache[key] = normalizedDescription;
+  queueDescriptionCacheWrite();
+}
+
+async function fetchDescriptionWithPython(site: string, url: string): Promise<string> {
+  const pythonPath = await resolvePythonPath();
+
+  return new Promise((resolve) => {
+    const child = spawn(pythonPath, [DESCRIPTION_FETCH_SCRIPT_PATH], {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    let stdout = "";
+
+    child.stdout.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+
+    child.on("error", () => resolve(""));
+
+    child.on("close", () => {
+      try {
+        const parsed = JSON.parse(stdout) as { description?: string };
+        resolve(String(parsed.description ?? "").trim());
+      } catch {
+        resolve("");
+      }
+    });
+
+    child.stdin.write(JSON.stringify({ site, url }));
+    child.stdin.end();
+  });
+}
+
+async function fetchAndCacheDescription(site: string, url: string): Promise<string> {
+  const key = buildDescriptionCacheKey(site, url);
+  const inFlight = inFlightDescriptionFetches.get(key);
+  if (inFlight) {
+    return await inFlight;
+  }
+
+  const task = (async () => {
+    const cached = await getCachedDescription(site, url);
+    if (cached) {
+      return cached;
+    }
+
+    const fetched = await fetchDescriptionWithPython(site, url);
+    if (fetched) {
+      await setCachedDescription(site, url, fetched);
+    }
+
+    return fetched;
+  })();
+
+  inFlightDescriptionFetches.set(key, task);
+
+  try {
+    return await task;
+  } finally {
+    inFlightDescriptionFetches.delete(key);
+  }
+}
+
+function queueDescriptionFetch(site: string, url: string): void {
+  const key = buildDescriptionCacheKey(site, url);
+  if (!site || !url || queuedDescriptionKeys.has(key)) {
+    return;
+  }
+
+  queuedDescriptionKeys.add(key);
+  descriptionQueue.push({ site, url });
+}
+
+async function startDescriptionQueueWorker(): Promise<void> {
+  if (isDescriptionQueueRunning) {
+    return;
+  }
+
+  isDescriptionQueueRunning = true;
+  try {
+    while (descriptionQueue.length > 0) {
+      const next = descriptionQueue.shift();
+      if (!next) {
+        continue;
+      }
+
+      const key = buildDescriptionCacheKey(next.site, next.url);
+      queuedDescriptionKeys.delete(key);
+      await fetchAndCacheDescription(next.site, next.url);
+      await sleep(DESCRIPTION_FETCH_DELAY_MS);
+    }
+  } finally {
+    isDescriptionQueueRunning = false;
+  }
+}
+
+async function hydrateDescriptionsFromCache(
+  results: Array<Record<string, unknown>>
+): Promise<Array<Record<string, unknown>>> {
+  if (results.length === 0) {
+    return results;
+  }
+
+  const cache = await readDescriptionCache();
+  let didChange = false;
+
+  const hydrated = results.map((row) => {
+    const existingDescription = String(row.description ?? "").trim();
+    if (existingDescription) {
+      return row;
+    }
+
+    const link = extractPrimaryJobLink(row);
+    if (!link) {
+      return row;
+    }
+
+    const key = buildDescriptionCacheKey(link.site, link.url);
+    const cachedDescription = String(cache[key] ?? "").trim();
+    if (!cachedDescription) {
+      return row;
+    }
+
+    didChange = true;
+    return {
+      ...row,
+      description: cachedDescription,
+    };
+  });
+
+  return didChange ? hydrated : results;
+}
+
+function enqueueDescriptionFetches(results: Array<Record<string, unknown>>): void {
+  for (const row of results) {
+    const existingDescription = String(row.description ?? "").trim();
+    if (existingDescription) {
+      continue;
+    }
+
+    const link = extractPrimaryJobLink(row);
+    if (!link) {
+      continue;
+    }
+
+    queueDescriptionFetch(link.site, link.url);
+  }
+
+  void startDescriptionQueueWorker();
+}
+
+export async function getJobDescription(site: string, url: string): Promise<string> {
+  const normalizedSite = normalizeDescriptionSite(site);
+  const normalizedUrl = String(url ?? "").trim();
+  if (!normalizedSite || !normalizedUrl) {
+    return "";
+  }
+
+  return await fetchAndCacheDescription(normalizedSite, normalizedUrl);
 }
 
 function getCachePath(slug: string): string {
@@ -606,6 +885,8 @@ async function presentSearchResult(
   const resultsWithStatus = applyStoredStatuses(dedupedResults, statuses);
   const industryOverrides = await readIndustryOverrideStore();
   const resultsWithIndustry = applyStoredIndustryOverrides(resultsWithStatus, industryOverrides);
+  const resultsWithDescriptions = await hydrateDescriptionsFromCache(resultsWithIndustry);
+  enqueueDescriptionFetches(resultsWithDescriptions);
 
   const debug: SearchDebugStats | undefined = includeDebug
     ? {
@@ -613,7 +894,7 @@ async function presentSearchResult(
         remoteFilteredCount: remoteFilteredResults.length,
         titleFilteredCount: titleFilteredResults.length,
         dedupedCount: dedupedResults.length,
-        finalCount: resultsWithIndustry.length,
+        finalCount: resultsWithDescriptions.length,
         excludedByRemoteFilter: rawResults.length - remoteFilteredResults.length,
         excludedByTitleFilter: remoteFilteredResults.length - titleFilteredResults.length,
         removedByDedupe: blacklistFilteredResults.length - dedupedResults.length,
@@ -621,10 +902,17 @@ async function presentSearchResult(
       }
     : undefined;
 
+  const rawResultCount = Number.isFinite(payload.rawResultCount)
+    ? payload.rawResultCount
+    : Number.isFinite(payload.resultCount)
+      ? payload.resultCount
+      : rawResults.length;
+
   return {
     ...payload,
-    results: resultsWithIndustry,
-    resultCount: resultsWithIndustry.length,
+    rawResultCount,
+    results: resultsWithDescriptions,
+    resultCount: resultsWithDescriptions.length,
     ...(debug ? { debug } : {}),
   };
 }
@@ -708,6 +996,7 @@ export async function loadOrRunSearch(
       title: definition.title,
       criteria: definition.criteria,
       results,
+      rawResultCount: count,
       resultCount: count,
       lastUpdated: new Date().toISOString(),
     };
@@ -730,6 +1019,7 @@ export async function loadOrRunSearch(
       title: definition.title,
       criteria: definition.criteria,
       results: [],
+      rawResultCount: 0,
       resultCount: 0,
       lastUpdated: new Date().toISOString(),
       error: String(error),

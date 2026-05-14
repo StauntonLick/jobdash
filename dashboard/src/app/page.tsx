@@ -29,6 +29,7 @@ type SearchData = {
   title: string;
   criteria: Record<string, string | number | boolean | string[]>;
   results: Array<Record<string, unknown>>;
+  rawResultCount: number;
   resultCount: number;
   lastUpdated: string;
   error?: string;
@@ -132,6 +133,23 @@ function formatPostingDate(dateValue: unknown): string {
   const day = String(posted.getDate()).padStart(2, "0");
   const month = String(posted.getMonth() + 1).padStart(2, "0");
   const year = String(posted.getFullYear()).slice(-2);
+
+  return `${day}/${month}/${year}`;
+}
+
+function formatDateDdMmYyyy(dateValue: unknown): string {
+  if (!dateValue) {
+    return "-";
+  }
+
+  const date = new Date(String(dateValue));
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+
+  const day = String(date.getDate()).padStart(2, "0");
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const year = String(date.getFullYear());
 
   return `${day}/${month}/${year}`;
 }
@@ -607,6 +625,8 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [refreshingAll, setRefreshingAll] = useState(false);
   const [selectedJob, setSelectedJob] = useState<JobSelection | null>(null);
+  const [selectedJobDescription, setSelectedJobDescription] = useState("");
+  const [isDescriptionLoading, setIsDescriptionLoading] = useState(false);
 
   const loadSearches = useCallback(async (forceRefresh: boolean) => {
     const response = await fetch(`/api/searches${forceRefresh ? "?forceRefresh=true" : ""}`, {
@@ -671,8 +691,19 @@ export default function Home() {
       return Math.max(maxTs, ts);
     }, 0);
 
-    return newest > 0 ? new Date(newest).toLocaleString() : null;
+    return newest > 0 ? new Date(newest).toISOString() : null;
   }, [searches]);
+
+  const refreshTooltip = useMemo(() => {
+    const rawTotal = searches.reduce(
+      (sum, search) => sum + (Number.isFinite(search.rawResultCount) ? search.rawResultCount : search.resultCount),
+      0
+    );
+    const filteredTotal = searches.reduce((sum, search) => sum + search.resultCount, 0);
+    const formattedDate = formatDateDdMmYyyy(globalLastUpdated);
+
+    return `Last updated ${formattedDate}. ${rawTotal} jobs found, ${filteredTotal} after filters applied.`;
+  }, [globalLastUpdated, searches]);
 
   const selectedJobRow = useMemo(() => {
     if (!selectedJob) {
@@ -704,6 +735,123 @@ export default function Home() {
 
     return [];
   }, [selectedJobRow]);
+
+  const selectedJobPrimaryLink = useMemo<JobLink | null>(() => {
+    return selectedJobLinks.find((link) => {
+      const site = String(link.site ?? "").trim().toLowerCase();
+      const url = String(link.url ?? "").trim();
+      return site && site !== "view" && url;
+    }) ?? null;
+  }, [selectedJobLinks]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    const fetchDescription = async () => {
+      if (!selectedJobRow) {
+        if (!isCancelled) {
+          setSelectedJobDescription("");
+          setIsDescriptionLoading(false);
+        }
+        return;
+      }
+
+      const existingDescription = String(selectedJobRow["description"] ?? "").trim();
+      if (existingDescription) {
+        if (!isCancelled) {
+          setSelectedJobDescription(existingDescription);
+          setIsDescriptionLoading(false);
+        }
+        return;
+      }
+
+      if (!selectedJobPrimaryLink) {
+        if (!isCancelled) {
+          setSelectedJobDescription("");
+          setIsDescriptionLoading(false);
+        }
+        return;
+      }
+
+      setIsDescriptionLoading(true);
+      try {
+        const response = await fetch("/api/job-descriptions", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            site: selectedJobPrimaryLink.site,
+            url: selectedJobPrimaryLink.url,
+          }),
+        });
+
+        const payload = (await response.json()) as { description?: string; error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Failed to fetch job description");
+        }
+
+        const fetchedDescription = String(payload.description ?? "").trim();
+        if (isCancelled) {
+          return;
+        }
+
+        setSelectedJobDescription(fetchedDescription);
+
+        if (fetchedDescription && selectedJob) {
+          setSearches((current) =>
+            current.map((search) => {
+              if (search.slug !== selectedJob.searchSlug) {
+                return search;
+              }
+
+              return {
+                ...search,
+                results: search.results.map((row) => {
+                  const rowKey = String(row["status_key"] ?? "").trim().toLowerCase();
+                  if (rowKey !== selectedJob.statusKey) {
+                    return row;
+                  }
+
+                  return {
+                    ...row,
+                    description: fetchedDescription,
+                  };
+                }),
+              };
+            })
+          );
+        }
+      } catch {
+        if (!isCancelled) {
+          setSelectedJobDescription("");
+        }
+      } finally {
+        if (!isCancelled) {
+          setIsDescriptionLoading(false);
+        }
+      }
+    };
+
+    void fetchDescription();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [selectedJob, selectedJobPrimaryLink, selectedJobRow]);
+
+  const displayedSelectedJobDescription = useMemo(() => {
+    if (!selectedJobRow) {
+      return "";
+    }
+
+    const rowDescription = String(selectedJobRow["description"] ?? "").trim();
+    if (rowDescription) {
+      return rowDescription;
+    }
+
+    return selectedJobDescription;
+  }, [selectedJobDescription, selectedJobRow]);
 
   const refreshAll = async () => {
     try {
@@ -828,7 +976,7 @@ export default function Home() {
                 onClick={() => void refreshAll()}
                 disabled={refreshingAll}
                 size="sm"
-                title={`Last updated: ${globalLastUpdated ?? "-"}`}
+                title={refreshTooltip}
                 className="h-9 shrink-0 rounded-full bg-white/20 px-4 text-sm font-semibold text-primary-foreground hover:bg-white/30"
               >
                 <RotateCw className={`mr-2 h-4 w-4 ${refreshingAll ? "animate-spin" : ""}`} />
@@ -848,7 +996,7 @@ export default function Home() {
                 className="flex h-full min-h-0 flex-1 flex-col overflow-hidden text-card-foreground"
               >
                 {/* Desktop table view – hidden on mobile */}
-                <div id={`search-results-wrap-${search.slug}`} className="hidden md:flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pb-6 pt-4">
+                <div id={`search-results-wrap-${search.slug}`} className="hidden md:flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pt-4">
                   <div className="min-w-[1100px]">
                     <Table id={`search-results-table-${search.slug}`} className="table-fixed">
                       <TableHeader id={`search-results-header-${search.slug}`}>
@@ -963,6 +1111,13 @@ export default function Home() {
                           )}
                         </TableBody>
                       </Table>
+
+                      <p
+                        id={`search-results-filter-summary-${search.slug}`}
+                        className="px-2 pt-3 pb-6 text-sm font-light italic text-muted-foreground"
+                      >
+                        {Math.max(0, search.rawResultCount - search.resultCount)} jobs hidden by filters
+                      </p>
                     </div>
                   </ScrollArea>
                 </div>
@@ -997,7 +1152,7 @@ export default function Home() {
                   <h3 className="truncate text-xl font-sans font-regular leading-none">
                     {selectedJobRow ? toDisplayValue(selectedJobRow["company"]) : ""}
                   </h3>
-                  <h2 className="text-4xl font-heading font-regular leading-none">
+                  <h2 className="text-4xl font-heading font-regular leading-[1]">
                     {selectedJobRow ? toDisplayValue(selectedJobRow["title"]) : ""}
                   </h2>
                 </div>
@@ -1049,9 +1204,18 @@ export default function Home() {
             <div className="min-h-0 flex-1 overflow-y-auto bg-background p-4 text-foreground">
               {selectedJobRow ? (
                 <div className="space-y-4 text-base leading-relaxed">
-                  {String(selectedJobRow["description"] ?? "").trim().length > 0
+                  {isDescriptionLoading && displayedSelectedJobDescription.length === 0
                     ? (
-                        <JobDescriptionMarkdown content={String(selectedJobRow["description"])} />
+                        <div id="job-description-loading-state" className="flex min-h-[280px] items-center justify-center text-muted-foreground">
+                          <div className="flex items-center gap-3" role="status" aria-live="polite" aria-label="Loading job description">
+                            <span className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-muted-foreground" aria-hidden="true" />
+                            <span className="text-sm">Loading description...</span>
+                          </div>
+                        </div>
+                      )
+                    : displayedSelectedJobDescription.length > 0
+                    ? (
+                        <JobDescriptionMarkdown content={displayedSelectedJobDescription} />
                       )
                     : "No description available for this role."}
                 </div>
