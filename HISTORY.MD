@@ -2,8 +2,34 @@
 
 This file is a dated running history of project changes and key decisions discussed in the repository.
 
+## 2026-05-16
+
+- Fixed production deployment failure caused by stale deploy path instructions and strict TypeScript inference in `dashboard/src/lib/jobspy-service.ts`:
+  - Correct deploy working directory confirmed as `/Users/jonny/Coding Projects/JobDash/dashboard` (not the old `/Users/jonny/Documents/...` path).
+  - Resolved build error `Property 'job_url' does not exist on type '{ site: string; }'` by explicitly typing `combined` as `Record<string, unknown>` in `mergeResults`.
+  - Deployed successfully using `npm run build` and `npx pm2 restart jobdash`; verified PM2 process `jobdash` is `online`.
+
+- Implemented bounded per-search site parallelism in `dashboard/src/lib/jobspy-service.ts` for resilient refreshes: site scrapes now run with a configurable concurrency cap (`JOBDASH_SITE_PARALLELISM`, default `2`) instead of strict serial execution, while preserving existing LinkedIn multi-pass and Glassdoor retry behavior.
+
+- Refactored search refresh behavior in `dashboard/src/lib/jobspy-service.ts` to improve reliability and consistency across all searches:
+  - Refreshes now run per site with an incremental `hours_old` window based on time since last refresh plus a 4-hour overlap.
+  - Glassdoor now retries when it returns zero results only if prior cached runs contained Glassdoor rows, with up to 4 retry attempts and progressive backoff.
+  - LinkedIn now always runs two passes, then conditionally runs a third pass only when the previous pass added new unique jobs (attempt limits are defined as constants for easy tuning).
+  - Cache writes now upsert new rows into existing cached rows (duplicate-aware merge) instead of replacing the entire search cache on each refresh.
+  - Added strict 14-day retention for active cache entries based on `date_posted`; older/invalid-date rows are moved into per-search archive files under `dashboard/.cache/searches-archive/`.
+
+- Diagnosed missing LinkedIn `date_posted` values in dashboard rows to a JobSpy parser selector mismatch: some LinkedIn cards now use `time.job-search-card__listdate--new` instead of `time.job-search-card__listdate`, causing parsed dates to be dropped for those cards.
+- Updated `dashboard/scripts/jobspy_patches.py` in `apply_linkedin_pagination_patch()` to also patch `LinkedIn._process_job` with a date fallback extractor that checks both LinkedIn time class variants and then falls back to any `time[datetime]` node in the metadata card.
+- Added robust datetime parsing fallbacks for LinkedIn `datetime` attribute formats (`%Y-%m-%d`, common ISO datetime variants, and `fromisoformat` with `Z` handling), then backfills `job_post.date_posted` only when the original parser returned `None`.
+
+## 2026-05-15
+
+- Diagnosed production refresh hangs to long-running `run_jobspy_search.py` child processes spawned by `dashboard/src/lib/jobspy-service.ts` with no hard timeout; observed multiple workers running for 5-50+ minutes and stale orphan workers from previous interrupted refreshes.
+- Added a hard timeout guard in `dashboard/src/lib/jobspy-service.ts` for Python search workers (`JOBDASH_PYTHON_SEARCH_TIMEOUT_MS`, default `180000`), with `SIGTERM` then `SIGKILL` fallback cleanup to prevent indefinite API hangs and worker buildup.
+
 ## 2026-05-14
 
+- Built the dashboard production bundle with `npm run build` in `dashboard/`, started it via `npm run start:prod`, and verified it serves successfully on `http://localhost:3001` (HTTP 200).
 - Adjusted the desktop filter-summary footer placement in `dashboard/src/app/page.tsx` so it is inside the table `ScrollArea` content (appears at the end of the table scroll) rather than outside the scroll container.
 - Added a per-search footer line under each desktop results table in `dashboard/src/app/page.tsx` showing `[y] jobs hidden by filters` (muted semantic color, italic body style), where `y = rawResultCount - resultCount`.
 - Updated `dashboard/src/lib/jobspy-service.ts` and `dashboard/src/app/page.tsx` so the refresh button hover hint now shows `Last updated dd/mm/yyyy. [x] jobs found, [y] after filters applied.` where `[x]` is the raw JobSpy total across searches/sites and `[y]` is the post-filter total shown in the dashboard.
@@ -19,6 +45,7 @@ This file is a dated running history of project changes and key decisions discus
 
 ## 2026-05-11
 
+- Updated the refresh-button tooltip format in `dashboard/src/app/page.tsx` to include time after the date: `Last updated dd/mm/yyyy at hh:mm. [x] jobs found, [y] after filters applied.`
 - Separated dev and production server ports: dev server runs on port 3000 (default `next dev`), production server (pm2) now runs on port 3001 via a new `start:prod` script in `package.json`. pm2 was re-registered to use `npm run start:prod`. Updated `next.config.ts` to add `100.*.*.*` to `allowedDevOrigins` so Tailscale-connected devices can access the dev server without being blocked by Next.js's cross-origin protection.
 - Updated the sidebar job-details header in `dashboard/src/app/page.tsx` to truncate displayed location values at the first comma (for example, `Livingston, Scotland` now displays as `Livingston`).
 - Set up pm2 to run the Next.js app as a persistent background service that auto-starts at login. The production build is served at `http://localhost:3000`. Use `pm2 stop jobdash` / `pm2 start jobdash` to control it, and rebuild with `npm run build` in `dashboard/` when you want the always-on version to reflect latest changes.

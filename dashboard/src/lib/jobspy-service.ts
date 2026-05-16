@@ -30,13 +30,26 @@ type SearchDebugStats = {
 };
 
 const CACHE_DIR = path.resolve(process.cwd(), ".cache", "searches");
+const ARCHIVE_DIR = path.resolve(process.cwd(), ".cache", "searches-archive");
 const STATUS_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-statuses.json");
 const INDUSTRY_OVERRIDE_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-industry-overrides.json");
 const SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "run_jobspy_search.py");
 const DESCRIPTION_FETCH_SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "fetch_job_description.py");
 const DESCRIPTION_CACHE_PATH = path.resolve(process.cwd(), ".cache", "job-descriptions.json");
 const CACHE_MAX_AGE_MS = 4 * 60 * 60 * 1000;
+const CACHE_RETENTION_DAYS = 14;
+const REFRESH_OVERLAP_HOURS = 4;
+const GLASSDOOR_MAX_RETRIES_ON_ZERO = 4;
+const GLASSDOOR_RETRY_BASE_DELAY_MS = 2000;
+const LINKEDIN_MIN_RUNS = 2;
+const LINKEDIN_MAX_RUNS = 3;
+const SITE_PARALLELISM = Math.max(
+  1,
+  Number(process.env.JOBDASH_SITE_PARALLELISM ?? "2") || 2
+);
 const DESCRIPTION_FETCH_DELAY_MS = 500;
+const PYTHON_SEARCH_TIMEOUT_MS = Number(process.env.JOBDASH_PYTHON_SEARCH_TIMEOUT_MS ?? "180000");
+const PYTHON_SEARCH_KILL_GRACE_MS = 5000;
 const PYTHON_PATH_CANDIDATES = [
   process.env.JOBDASH_PYTHON,
   path.resolve(process.cwd(), "../venv/bin/python"),
@@ -544,6 +557,10 @@ function getCachePath(slug: string): string {
   return path.join(CACHE_DIR, `${slug}.json`);
 }
 
+function getArchivePath(slug: string): string {
+  return path.join(ARCHIVE_DIR, `${slug}.json`);
+}
+
 async function readCache(slug: string): Promise<SearchResult | null> {
   try {
     const content = await fs.readFile(getCachePath(slug), "utf8");
@@ -556,6 +573,27 @@ async function readCache(slug: string): Promise<SearchResult | null> {
 async function writeCache(payload: SearchResult): Promise<void> {
   await ensureCacheDir();
   await fs.writeFile(getCachePath(payload.slug), JSON.stringify(payload, null, 2), "utf8");
+}
+
+type SearchArchive = {
+  slug: string;
+  title: string;
+  lastUpdated: string;
+  results: Array<Record<string, unknown>>;
+};
+
+async function readArchive(slug: string): Promise<SearchArchive | null> {
+  try {
+    const content = await fs.readFile(getArchivePath(slug), "utf8");
+    return JSON.parse(content) as SearchArchive;
+  } catch {
+    return null;
+  }
+}
+
+async function writeArchive(payload: SearchArchive): Promise<void> {
+  await fs.mkdir(ARCHIVE_DIR, { recursive: true });
+  await fs.writeFile(getArchivePath(payload.slug), JSON.stringify(payload, null, 2), "utf8");
 }
 
 function isCacheStale(lastUpdated: string): boolean {
@@ -572,6 +610,214 @@ function normalizeText(value: unknown): string {
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+function normalizeSites(rawSiteName: unknown): string[] {
+  if (rawSiteName == null) {
+    return [];
+  }
+
+  if (Array.isArray(rawSiteName)) {
+    return rawSiteName
+      .map((site) => String(site).trim().toLowerCase())
+      .filter(Boolean);
+  }
+
+  const value = String(rawSiteName).trim().toLowerCase();
+  return value ? [value] : [];
+}
+
+function normalizeHoursOld(value: unknown): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.ceil(parsed) : 24;
+}
+
+function getIncrementalHours(criteria: SearchDefinition["criteria"], lastUpdated?: string): number {
+  const defaultHours = normalizeHoursOld(criteria.hours_old);
+  if (!lastUpdated) {
+    return defaultHours;
+  }
+
+  const lastUpdatedMs = new Date(lastUpdated).getTime();
+  if (!Number.isFinite(lastUpdatedMs)) {
+    return defaultHours;
+  }
+
+  const elapsedHours = Math.max(0, (Date.now() - lastUpdatedMs) / (60 * 60 * 1000));
+  return Math.max(1, Math.ceil(elapsedHours + REFRESH_OVERLAP_HOURS));
+}
+
+function getRowSites(row: Record<string, unknown>): string[] {
+  const sites = new Set<string>();
+
+  const siteField = String(row.site ?? "");
+  for (const part of siteField.split(",")) {
+    const normalized = part.trim().toLowerCase();
+    if (normalized) {
+      sites.add(normalized);
+    }
+  }
+
+  if (Array.isArray(row.job_url)) {
+    for (const link of row.job_url) {
+      if (!link || typeof link !== "object") {
+        continue;
+      }
+      const linkSite = String((link as Record<string, unknown>).site ?? "").trim().toLowerCase();
+      if (linkSite) {
+        sites.add(linkSite);
+      }
+    }
+  }
+
+  return Array.from(sites);
+}
+
+function hasRowsForSite(rows: Array<Record<string, unknown>>, site: string): boolean {
+  const normalizedSite = site.trim().toLowerCase();
+  return rows.some((row) => getRowSites(row).includes(normalizedSite));
+}
+
+function buildResultIdentity(row: Record<string, unknown>): string {
+  const primaryLink = extractPrimaryJobLink(row);
+  if (primaryLink) {
+    return `${normalizeText(primaryLink.site)}::${normalizeText(primaryLink.url)}`;
+  }
+
+  return [
+    normalizeText(row.site),
+    normalizeText(row.title),
+    normalizeText(row.company),
+    normalizeText(row.location),
+  ].join("::");
+}
+
+function mergeSiteNames(existingSite: unknown, incomingSite: unknown): string {
+  const parts = [
+    ...String(existingSite ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+    ...String(incomingSite ?? "")
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  ];
+
+  return Array.from(new Set(parts)).join(", ");
+}
+
+function mergeResults(
+  existingRows: Array<Record<string, unknown>>,
+  incomingRows: Array<Record<string, unknown>>
+): Array<Record<string, unknown>> {
+  const merged = new Map<string, Record<string, unknown>>();
+
+  for (const row of existingRows) {
+    merged.set(buildResultIdentity(row), { ...row });
+  }
+
+  for (const row of incomingRows) {
+    const key = buildResultIdentity(row);
+    const current = merged.get(key);
+    if (!current) {
+      merged.set(key, { ...row });
+      continue;
+    }
+
+    const combined: Record<string, unknown> = {
+      ...current,
+      ...row,
+      site: mergeSiteNames(current.site, row.site),
+    };
+
+    const existingLinks = Array.isArray(current.job_url) ? current.job_url : null;
+    const incomingLinks = Array.isArray(row.job_url) ? row.job_url : null;
+    if (existingLinks && incomingLinks) {
+      const allLinks = [...existingLinks, ...incomingLinks].filter((link) => link && typeof link === "object");
+      const dedupedLinks = new Map<string, Record<string, unknown>>();
+
+      for (const link of allLinks as Array<Record<string, unknown>>) {
+        const site = normalizeText(link.site);
+        const url = normalizeText(link.url);
+        const id = `${site}::${url}`;
+        if (!id || id === "::") {
+          continue;
+        }
+        dedupedLinks.set(id, link);
+      }
+
+      combined.job_url = Array.from(dedupedLinks.values());
+    }
+
+    merged.set(key, combined);
+  }
+
+  return Array.from(merged.values());
+}
+
+function parseDatePosted(value: unknown): Date | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = new Date(raw);
+  if (Number.isFinite(parsed.getTime())) {
+    return parsed;
+  }
+
+  const shortDate = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!shortDate) {
+    return null;
+  }
+
+  const [, year, month, day] = shortDate;
+  const fallback = new Date(`${year}-${month}-${day}T00:00:00Z`);
+  return Number.isFinite(fallback.getTime()) ? fallback : null;
+}
+
+function splitActiveAndArchivedResults(results: Array<Record<string, unknown>>): {
+  active: Array<Record<string, unknown>>;
+  archived: Array<Record<string, unknown>>;
+} {
+  const now = Date.now();
+  const cutoffMs = now - CACHE_RETENTION_DAYS * 24 * 60 * 60 * 1000;
+
+  const active: Array<Record<string, unknown>> = [];
+  const archived: Array<Record<string, unknown>> = [];
+
+  for (const row of results) {
+    const postedDate = parseDatePosted(row.date_posted);
+    if (!postedDate || postedDate.getTime() < cutoffMs) {
+      archived.push(row);
+      continue;
+    }
+
+    active.push(row);
+  }
+
+  return { active, archived };
+}
+
+async function appendToArchive(
+  slug: string,
+  title: string,
+  rowsToArchive: Array<Record<string, unknown>>
+): Promise<void> {
+  if (rowsToArchive.length === 0) {
+    return;
+  }
+
+  const currentArchive = await readArchive(slug);
+  const mergedArchiveRows = mergeResults(currentArchive?.results ?? [], rowsToArchive);
+
+  await writeArchive({
+    slug,
+    title,
+    lastUpdated: new Date().toISOString(),
+    results: mergedArchiveRows,
+  });
 }
 
 function matchesWholeKeyword(haystack: string, keyword: string): boolean {
@@ -929,8 +1175,51 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
       stdio: ["pipe", "pipe", "pipe"],
     });
 
+    let didFinish = false;
+    let killTimer: NodeJS.Timeout | null = null;
+
     let stdout = "";
     let stderr = "";
+
+    const cleanup = (): void => {
+      if (killTimer) {
+        clearTimeout(killTimer);
+        killTimer = null;
+      }
+    };
+
+    const failWithTimeout = (): void => {
+      if (didFinish) {
+        return;
+      }
+
+      didFinish = true;
+      cleanup();
+
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // Ignore kill errors if process is already exiting.
+      }
+
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // Ignore kill errors if process has already stopped.
+        }
+      }, PYTHON_SEARCH_KILL_GRACE_MS);
+
+      reject(
+        new Error(
+          `JobSpy search timed out after ${PYTHON_SEARCH_TIMEOUT_MS}ms for criteria location=${String(
+            criteria.location ?? ""
+          )}`
+        )
+      );
+    };
+
+    killTimer = setTimeout(failWithTimeout, PYTHON_SEARCH_TIMEOUT_MS);
 
     child.stdout.on("data", (chunk: Buffer) => {
       stdout += chunk.toString();
@@ -940,9 +1229,24 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
       stderr += chunk.toString();
     });
 
-    child.on("error", (error) => reject(error));
+    child.on("error", (error) => {
+      if (didFinish) {
+        return;
+      }
+
+      didFinish = true;
+      cleanup();
+      reject(error);
+    });
 
     child.on("close", (code) => {
+      if (didFinish) {
+        return;
+      }
+
+      didFinish = true;
+      cleanup();
+
       if (code !== 0) {
         reject(new Error(stderr || stdout || `JobSpy process exited with code ${code}`));
         return;
@@ -974,33 +1278,137 @@ async function runPythonSearch(criteria: SearchDefinition["criteria"]): Promise<
   });
 }
 
+async function runResilientSearch(
+  definition: SearchDefinition,
+  cached: SearchResult | null
+): Promise<{ results: Array<Record<string, unknown>>; count: number }> {
+  const baseCriteria = definition.criteria;
+  const requestedSites = normalizeSites(baseCriteria.site_name);
+  const sites = requestedSites.length > 0 ? requestedSites : ["indeed", "linkedin", "glassdoor"];
+  const hoursOld = getIncrementalHours(baseCriteria, cached?.lastUpdated);
+
+  async function runSiteSearch(site: string): Promise<Array<Record<string, unknown>>> {
+    const siteCriteria: SearchDefinition["criteria"] = {
+      ...baseCriteria,
+      site_name: site,
+      hours_old: hoursOld,
+    };
+
+    if (site === "linkedin") {
+      let linkedInRuns = 0;
+      let previousUniqueCount = 0;
+      let currentRows: Array<Record<string, unknown>> = [];
+
+      while (linkedInRuns < LINKEDIN_MIN_RUNS) {
+        const { results } = await runPythonSearch(siteCriteria);
+        currentRows = mergeResults(currentRows, results);
+        previousUniqueCount = currentRows.length;
+        linkedInRuns += 1;
+      }
+
+      while (linkedInRuns < LINKEDIN_MAX_RUNS) {
+        const { results } = await runPythonSearch(siteCriteria);
+        const nextRows = mergeResults(currentRows, results);
+        const gainedRows = nextRows.length - previousUniqueCount;
+
+        currentRows = nextRows;
+        previousUniqueCount = currentRows.length;
+        linkedInRuns += 1;
+
+        if (gainedRows <= 0) {
+          break;
+        }
+      }
+
+      return currentRows;
+    }
+
+    if (site === "glassdoor") {
+      let { results } = await runPythonSearch(siteCriteria);
+      const shouldRetryOnZero =
+        results.length === 0 && hasRowsForSite(cached?.results ?? [], "glassdoor");
+
+      if (shouldRetryOnZero) {
+        for (let retry = 1; retry <= GLASSDOOR_MAX_RETRIES_ON_ZERO; retry += 1) {
+          await sleep(GLASSDOOR_RETRY_BASE_DELAY_MS * retry);
+          const retryResponse = await runPythonSearch(siteCriteria);
+          results = retryResponse.results;
+          if (results.length > 0) {
+            break;
+          }
+        }
+      }
+
+      return results;
+    }
+
+    const { results } = await runPythonSearch(siteCriteria);
+    return results;
+  }
+
+  // Keep site-level scraping bounded so refreshes are faster without overloading providers.
+  async function runWithConcurrency<T, R>(
+    items: T[],
+    concurrency: number,
+    worker: (item: T) => Promise<R>
+  ): Promise<R[]> {
+    const safeConcurrency = Math.max(1, Math.min(concurrency, items.length || 1));
+    const output: R[] = new Array(items.length);
+    let nextIndex = 0;
+
+    async function runner(): Promise<void> {
+      while (nextIndex < items.length) {
+        const currentIndex = nextIndex;
+        nextIndex += 1;
+        output[currentIndex] = await worker(items[currentIndex]);
+      }
+    }
+
+    await Promise.all(Array.from({ length: safeConcurrency }, () => runner()));
+    return output;
+  }
+
+  const resultsBySite = await runWithConcurrency(sites, SITE_PARALLELISM, runSiteSearch);
+  const mergedSiteResults = resultsBySite.flat();
+
+  const dedupedResults = mergeResults([], mergedSiteResults);
+  return {
+    results: dedupedResults,
+    count: dedupedResults.length,
+  };
+}
+
 export async function loadOrRunSearch(
   definition: SearchDefinition,
   forceRefresh = false,
   filters: SearchFilters = { includeTitleTerms: [], excludeTitleTerms: [], blacklistCompanies: [] },
   includeDebug = false
 ): Promise<SearchResult> {
-  let cached: SearchResult | null = null;
+  const cached: SearchResult | null = await readCache(definition.slug);
 
   if (!forceRefresh) {
-    cached = await readCache(definition.slug);
     if (cached && !isCacheStale(cached.lastUpdated)) {
       return await presentSearchResult(cached, filters, includeDebug);
     }
   }
 
   try {
-    const { results, count } = await runPythonSearch(definition.criteria);
+    const { results } = await runResilientSearch(definition, cached);
+    const mergedResults = mergeResults(cached?.results ?? [], results);
+    const { active, archived } = splitActiveAndArchivedResults(mergedResults);
+
     const payload: SearchResult = {
       slug: definition.slug,
       title: definition.title,
       criteria: definition.criteria,
-      results,
-      rawResultCount: count,
-      resultCount: count,
+      results: active,
+      rawResultCount: active.length,
+      resultCount: active.length,
       lastUpdated: new Date().toISOString(),
     };
+
     await writeCache(payload);
+    await appendToArchive(definition.slug, definition.title, archived);
     return await presentSearchResult(payload, filters, includeDebug);
   } catch (error) {
     if (cached) {

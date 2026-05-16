@@ -92,6 +92,7 @@ def apply_linkedin_pagination_patch() -> None:
     page (`len(job_cards)`) rather than the running total.
     """
     try:
+        from datetime import date, datetime
         import math
         import random
         import time
@@ -118,6 +119,55 @@ def apply_linkedin_pagination_patch() -> None:
     linked_in_band_delay = float(os.getenv("JOBDASH_LINKEDIN_BAND_DELAY_SECONDS", "1.5"))
     LinkedIn.delay = max(0.0, linked_in_delay)
     LinkedIn.band_delay = max(0.0, linked_in_band_delay)
+
+    original_process_job = LinkedIn._process_job
+
+    def _extract_linkedin_date_posted(job_card: Any) -> date | None:
+        metadata_card = job_card.find("div", class_="base-search-card__metadata")
+        if metadata_card is None:
+            return None
+
+        # LinkedIn uses both the legacy and "new" listdate class names.
+        datetime_tag = metadata_card.find("time", class_="job-search-card__listdate")
+        if datetime_tag is None:
+            datetime_tag = metadata_card.find("time", class_="job-search-card__listdate--new")
+        if datetime_tag is None:
+            datetime_tag = metadata_card.find("time", attrs={"datetime": True})
+
+        if datetime_tag is None or "datetime" not in datetime_tag.attrs:
+            return None
+
+        datetime_str = str(datetime_tag["datetime"]).strip()
+        if not datetime_str:
+            return None
+
+        for fmt in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M:%S%z"):
+            try:
+                return datetime.strptime(datetime_str, fmt).date()
+            except ValueError:
+                continue
+
+        try:
+            parsed = datetime.fromisoformat(datetime_str.replace("Z", "+00:00"))
+            return parsed.date()
+        except ValueError:
+            return None
+
+    def _patched_process_job(
+        self: Any, job_card: Any, job_id: str, full_descr: bool
+    ) -> Any:
+        job_post = original_process_job(self, job_card, job_id, full_descr)
+        if job_post is None:
+            return None
+
+        if getattr(job_post, "date_posted", None) is None:
+            fallback_date = _extract_linkedin_date_posted(job_card)
+            if fallback_date is not None:
+                job_post.date_posted = fallback_date
+
+        return job_post
+
+    LinkedIn._process_job = _patched_process_job  # type: ignore[assignment]
 
     def _patched_scrape(self: Any, scraper_input: ScraperInput) -> JobResponse:
         self.scraper_input = scraper_input
