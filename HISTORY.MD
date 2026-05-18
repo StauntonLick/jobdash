@@ -4,6 +4,8 @@ This file is a dated running history of project changes and key decisions discus
 
 ## 2026-05-16
 
+- Updated LinkedIn remote fallback labeling so rows accepted via fallback with empty `location` are tagged with `work_mode: "Likely Remote"` in `dashboard/src/lib/jobspy-service.ts`, and the sidebar now renders this as `Likely Remote` in `dashboard/src/app/page.tsx` instead of defaulting those rows to `In-Person`.
+
 - Fixed production deployment failure caused by stale deploy path instructions and strict TypeScript inference in `dashboard/src/lib/jobspy-service.ts`:
   - Correct deploy working directory confirmed as `/Users/jonny/Coding Projects/JobDash/dashboard` (not the old `/Users/jonny/Documents/...` path).
   - Resolved build error `Property 'job_url' does not exist on type '{ site: string; }'` by explicitly typing `combined` as `Record<string, unknown>` in `mergeResults`.

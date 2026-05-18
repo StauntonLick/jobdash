@@ -1110,18 +1110,30 @@ async function presentSearchResult(
   let linkedInRemoteFallbackCount = 0;
   const rawResults = payload.results;
   const remoteFilteredResults = shouldEnforceRemoteOnly(payload.criteria)
-    ? rawResults.filter((row) => {
+    ? rawResults.reduce<Array<Record<string, unknown>>>((accepted, row) => {
         if (isRemoteResult(row)) {
-          return true;
+          accepted.push(row);
+          return accepted;
         }
 
         if (isLikelyLinkedInRemote(row)) {
           linkedInRemoteFallbackCount += 1;
-          return true;
+
+          const normalizedLocation = normalizeText(row.location);
+          if (!normalizedLocation) {
+            accepted.push({
+              ...row,
+              work_mode: "Likely Remote",
+            });
+            return accepted;
+          }
+
+          accepted.push(row);
+          return accepted;
         }
 
-        return false;
-      })
+        return accepted;
+      }, [])
     : rawResults;
   const enrichedResults = annotateDerivedFields(remoteFilteredResults);
   const titleFilteredResults = applyTitleFilters(enrichedResults, filters);

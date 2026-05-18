@@ -229,6 +229,10 @@ function deriveWorkMode(row: Record<string, unknown>): string {
     .trim()
     .toLowerCase();
 
+  if (explicitMode.includes("likely remote")) {
+    return "Likely Remote";
+  }
+
   if (explicitMode.includes("hybrid")) {
     return "Hybrid";
   }
