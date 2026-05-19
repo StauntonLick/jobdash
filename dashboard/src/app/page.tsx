@@ -109,12 +109,90 @@ function isJobLinkArray(value: unknown): value is JobLink[] {
   );
 }
 
-function formatAge(dateValue: unknown): string {
-  if (!dateValue || dateValue === "-") return "-";
-  const posted = new Date(String(dateValue));
-  if (Number.isNaN(posted.getTime())) return "-";
+function parseDateValue(value: unknown): Date | null {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-") {
+    return null;
+  }
 
-  const diffMs = Date.now() - posted.getTime();
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function hasTimePrecision(value: unknown): boolean {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "-") {
+    return false;
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return false;
+  }
+
+  return /T\d{2}:\d{2}| \d{2}:\d{2}/.test(raw);
+}
+
+function combinePostedDateWithFirstSeenTime(
+  postedDateValue: unknown,
+  firstSeenValue: unknown
+): Date | null {
+  const postedRaw = String(postedDateValue ?? "").trim();
+  const firstSeen = parseDateValue(firstSeenValue);
+
+  if (!postedRaw || !firstSeen) {
+    return null;
+  }
+
+  const postedDateOnly = postedRaw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!postedDateOnly) {
+    return null;
+  }
+
+  const [, year, month, day] = postedDateOnly;
+  const combined = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    firstSeen.getHours(),
+    firstSeen.getMinutes(),
+    firstSeen.getSeconds(),
+    firstSeen.getMilliseconds()
+  );
+
+  return Number.isNaN(combined.getTime()) ? null : combined;
+}
+
+function getAgeSourceDate(row: Record<string, unknown>): Date | null {
+  const postedDate = parseDateValue(row["date_posted"]);
+  if (!postedDate) {
+    return parseDateValue(row["first_seen_at"]);
+  }
+
+  if (hasTimePrecision(row["date_posted"])) {
+    return postedDate;
+  }
+
+  const combined = combinePostedDateWithFirstSeenTime(
+    row["date_posted"],
+    row["first_seen_at"]
+  );
+  if (combined) {
+    return combined;
+  }
+
+  const firstSeen = parseDateValue(row["first_seen_at"]);
+  return firstSeen ?? postedDate;
+}
+
+function getSortTimestamp(row: Record<string, unknown>): number {
+  return getAgeSourceDate(row)?.getTime() ?? 0;
+}
+
+function formatAge(row: Record<string, unknown>): string {
+  const ageSourceDate = getAgeSourceDate(row);
+  if (!ageSourceDate) return "-";
+
+  const diffMs = Date.now() - ageSourceDate.getTime();
   const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
 
   if (diffHours < 24) {
@@ -548,8 +626,8 @@ function MobileJobList({
   const sortedResults = useMemo(
     () =>
       [...search.results].sort((a, b) => {
-        const da = a["date_posted"] ? new Date(String(a["date_posted"])).getTime() : 0;
-        const db = b["date_posted"] ? new Date(String(b["date_posted"])).getTime() : 0;
+        const da = getSortTimestamp(a);
+        const db = getSortTimestamp(b);
         return db - da;
       }),
     [search.results]
@@ -568,7 +646,7 @@ function MobileJobList({
         const title = String(row["title"] ?? "");
         const company = toDisplayValue(row["company"]);
         const industry = String(row["industry_label"] ?? "") || "-";
-        const age = formatAge(row["date_posted"]);
+        const age = formatAge(row);
         const status = toJobStatus(row["job_status"]);
 
         return (
@@ -1041,12 +1119,8 @@ export default function Home() {
                           ) : (
                             [...search.results]
                               .sort((a, b) => {
-                                const da = a["date_posted"]
-                                  ? new Date(String(a["date_posted"])).getTime()
-                                  : 0;
-                                const db = b["date_posted"]
-                                  ? new Date(String(b["date_posted"])).getTime()
-                                  : 0;
+                                const da = getSortTimestamp(a);
+                                const db = getSortTimestamp(b);
                                 return db - da;
                               })
                               .map((row, index) => (
@@ -1072,7 +1146,7 @@ export default function Home() {
                                           showNewIndicator={String(row["job_status"] ?? "").trim().toLowerCase() === "new"}
                                         />
                                       ) : column === "date_posted" ? (
-                                        formatAge(row[column])
+                                        formatAge(row)
                                       ) : column === "company" ? (
                                         <span className="block truncate" title={toDisplayValue(row[column])}>
                                           {toDisplayValue(row[column])}

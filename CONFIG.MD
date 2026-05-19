@@ -17,8 +17,8 @@ JobDash will search for in-person, hybrid or remote roles in each of the followi
 - Glasgow, UK, 10
 - Scotland, UK, 0
 - Newcastle, UK, 10
+- Manchester, UK, 10
 - London, UK, 0
-- Melbourne, Australia, 0
 
 ### Remote Only
 JobDash will search for remote roles in these countries and create a tab to display them. See the list of compatible countries in the JobSpy docs:
@@ -47,6 +47,7 @@ Jobs with titles containing the following will be excluded:
 - Product Owner
 - Management
 - Marketing
+- Kitchen
 
 ### BLACKLIST
 Companies in this list will be excluded:
@@ -55,5 +56,7 @@ Companies in this list will be excluded:
 - DesignMeshAI
 - Crossing Hurdles
 - Mercor
+- hackajob
+- Jobgether
 - Rockstar Games
 

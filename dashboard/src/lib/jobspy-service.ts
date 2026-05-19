@@ -707,21 +707,63 @@ function mergeSiteNames(existingSite: unknown, incomingSite: unknown): string {
   return Array.from(new Set(parts)).join(", ");
 }
 
+function parseIsoTimestamp(value: unknown): Date | null {
+  const raw = String(value ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+
+  const parsed = new Date(raw);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function resolveFirstSeenAt(
+  existingFirstSeen: unknown,
+  incomingFirstSeen: unknown,
+  fallbackIso: string
+): string {
+  const existing = parseIsoTimestamp(existingFirstSeen);
+  const incoming = parseIsoTimestamp(incomingFirstSeen);
+
+  if (existing && incoming) {
+    return existing.getTime() <= incoming.getTime()
+      ? existing.toISOString()
+      : incoming.toISOString();
+  }
+
+  if (existing) {
+    return existing.toISOString();
+  }
+
+  if (incoming) {
+    return incoming.toISOString();
+  }
+
+  return fallbackIso;
+}
+
 function mergeResults(
   existingRows: Array<Record<string, unknown>>,
   incomingRows: Array<Record<string, unknown>>
 ): Array<Record<string, unknown>> {
   const merged = new Map<string, Record<string, unknown>>();
+  const mergeStartedAtIso = new Date().toISOString();
 
   for (const row of existingRows) {
-    merged.set(buildResultIdentity(row), { ...row });
+    merged.set(buildResultIdentity(row), {
+      ...row,
+      first_seen_at: resolveFirstSeenAt(row.first_seen_at, null, mergeStartedAtIso),
+    });
   }
 
   for (const row of incomingRows) {
     const key = buildResultIdentity(row);
     const current = merged.get(key);
     if (!current) {
-      merged.set(key, { ...row });
+      merged.set(key, {
+        ...row,
+        first_seen_at: resolveFirstSeenAt(null, row.first_seen_at, mergeStartedAtIso),
+      });
       continue;
     }
 
@@ -729,6 +771,7 @@ function mergeResults(
       ...current,
       ...row,
       site: mergeSiteNames(current.site, row.site),
+      first_seen_at: resolveFirstSeenAt(current.first_seen_at, row.first_seen_at, mergeStartedAtIso),
     };
 
     const existingLinks = Array.isArray(current.job_url) ? current.job_url : null;

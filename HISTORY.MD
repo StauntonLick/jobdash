@@ -2,7 +2,18 @@
 
 This file is a dated running history of project changes and key decisions discussed in the repository.
 
-## 2026-05-16
+## 2026-05-18
+
+- Fixed an age fallback regression in `dashboard/src/app/page.tsx` where date-only `date_posted` rows were always using `first_seen_at`, making many rows appear as ~1 hour old.
+- Updated age fallback hierarchy to:
+  1) JobSpy timestamp when present in `date_posted`
+  2) Combined timestamp using JobSpy date (`date_posted`) + retrieval time (`first_seen_at`)
+  3) Raw `first_seen_at` timestamp as final fallback
+
+- Fixed age calculation precision for newly found jobs in `dashboard/src/lib/jobspy-service.ts` and `dashboard/src/app/page.tsx`:
+  - Added persistent `first_seen_at` timestamps during result merging so each job tracks when JobDash first observed it.
+  - Updated age rendering and result sorting to use `first_seen_at` when `date_posted` is date-only (no time component), while continuing to use `date_posted` when a real timestamp is present.
+  - This avoids unrealistic "all jobs are N hours old" clusters caused by midnight-normalized date-only `date_posted` values.
 
 - Updated LinkedIn remote fallback labeling so rows accepted via fallback with empty `location` are tagged with `work_mode: "Likely Remote"` in `dashboard/src/lib/jobspy-service.ts`, and the sidebar now renders this as `Likely Remote` in `dashboard/src/app/page.tsx` instead of defaulting those rows to `In-Person`.
 
@@ -23,6 +34,8 @@ This file is a dated running history of project changes and key decisions discus
 - Diagnosed missing LinkedIn `date_posted` values in dashboard rows to a JobSpy parser selector mismatch: some LinkedIn cards now use `time.job-search-card__listdate--new` instead of `time.job-search-card__listdate`, causing parsed dates to be dropped for those cards.
 - Updated `dashboard/scripts/jobspy_patches.py` in `apply_linkedin_pagination_patch()` to also patch `LinkedIn._process_job` with a date fallback extractor that checks both LinkedIn time class variants and then falls back to any `time[datetime]` node in the metadata card.
 - Added robust datetime parsing fallbacks for LinkedIn `datetime` attribute formats (`%Y-%m-%d`, common ISO datetime variants, and `fromisoformat` with `Z` handling), then backfills `job_post.date_posted` only when the original parser returned `None`.
+
+## 2026-05-16
 
 ## 2026-05-15
 

@@ -19,6 +19,6 @@
 - I am not a developer, so I want the code to be as simple and readable as possible, with comments where necessary to explain what is going on.
 - Give all high-level HTML elements a human-readable semantic ID to aid with code readability.
 - To update the live build: 
-    cd "/Users/jonny/Documents/Coding Projects/JobDash/dashboard"
+    cd "/Users/jonny/Coding Projects/JobDash/dashboard"
     npm run build
-    pm2 restart jobdash
+    npx pm2 restart jobdash
