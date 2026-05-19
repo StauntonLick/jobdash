@@ -14,5 +14,6 @@ export const INDUSTRY_LABELS = [
   "Media",
   "Telecom",
   "Energy",
+  "Property",
   "Tech",
 ] as const;

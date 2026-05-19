@@ -79,6 +79,47 @@ def apply_glassdoor_partial_error_patch() -> None:
     Glassdoor._partial_error_patch_applied = True
 
 
+def apply_indeed_structured_work_mode_patch() -> None:
+    """Patch Indeed scraping to derive remote status from structured work-mode attributes."""
+    try:
+        import jobspy.indeed as indeed_module
+        import jobspy.indeed.util as indeed_util_module
+        from jobspy.indeed import Indeed
+    except Exception:
+        return
+
+    if getattr(Indeed, "_structured_work_mode_patch_applied", False):
+        return
+
+    remote_key = "DSQF7"
+    hybrid_key = "PAXZC"
+    in_person_key = "SWG7T"
+
+    def _infer_structured_work_mode(job: dict[str, Any]) -> str | None:
+        attributes = job.get("attributes") or []
+        keys = {
+            str(attribute.get("key", "")).strip().upper()
+            for attribute in attributes
+            if isinstance(attribute, dict)
+        }
+
+        if hybrid_key in keys:
+            return "hybrid"
+        if remote_key in keys:
+            return "remote"
+        if in_person_key in keys:
+            return "in_person"
+        return None
+
+    def _is_job_remote_from_structured_fields(job: dict[str, Any], description: str) -> bool:
+        del description
+        return _infer_structured_work_mode(job) == "remote"
+
+    indeed_util_module.is_job_remote = _is_job_remote_from_structured_fields
+    indeed_module.is_job_remote = _is_job_remote_from_structured_fields
+    Indeed._structured_work_mode_patch_applied = True
+
+
 def apply_linkedin_pagination_patch() -> None:
     """
     Fix a pagination offset bug in JobSpy's LinkedIn scraper.
@@ -115,8 +156,8 @@ def apply_linkedin_pagination_patch() -> None:
     # JobSpy defaults to a 3-7 second page delay on LinkedIn, which dominates
     # refresh time for larger result targets. Keep a smaller jitter by default
     # and allow override via env vars.
-    linked_in_delay = float(os.getenv("JOBDASH_LINKEDIN_DELAY_SECONDS", "1.0"))
-    linked_in_band_delay = float(os.getenv("JOBDASH_LINKEDIN_BAND_DELAY_SECONDS", "1.5"))
+    linked_in_delay = float(os.getenv("JOBDASH_LINKEDIN_DELAY_SECONDS", "0.5"))
+    linked_in_band_delay = float(os.getenv("JOBDASH_LINKEDIN_BAND_DELAY_SECONDS", "1.0"))
     LinkedIn.delay = max(0.0, linked_in_delay)
     LinkedIn.band_delay = max(0.0, linked_in_band_delay)
 

@@ -42,7 +42,7 @@ const REFRESH_OVERLAP_HOURS = 4;
 const GLASSDOOR_MAX_RETRIES_ON_ZERO = 4;
 const GLASSDOOR_RETRY_BASE_DELAY_MS = 2000;
 const LINKEDIN_MIN_RUNS = 2;
-const LINKEDIN_MAX_RUNS = 3;
+const LINKEDIN_MAX_RUNS = 2;
 const SITE_PARALLELISM = Math.max(
   1,
   Number(process.env.JOBDASH_SITE_PARALLELISM ?? "2") || 2
@@ -72,21 +72,22 @@ export const JOB_STATUS_VALUES = ["New", "Skipped", "Applied", "Shortlist", "Lon
 export type JobStatus = (typeof JOB_STATUS_VALUES)[number];
 
 const INDUSTRY_RULES: Array<{ label: string; keywords: string[] }> = [
-  { label: "AI", keywords: ["artificial intelligence", "machine learning", "llm", "large language model", "generative ai", "prompt engineering", "neural network"] },
-  { label: "Videogames", keywords: ["video game", "videogame", "gaming", "game studio", "gameplay", "unity", "unreal engine","AAA"] },
-  { label: "Gambling", keywords: ["gambling", "sports betting", "sportsbook", "betting", "casino", "igaming", "wagering"] },
-  { label: "Government", keywords: ["civil service", "government", "public sector", "regulatory agency", "ministry", "council"] },
-  { label: "Healthcare", keywords: ["healthcare", "hospital", "patient", "medical", "clinical", "pharma", "medicine"] },
-  { label: "Finance", keywords: ["bank", "banking", "financial", "insurance", "retirement", "wealth", "pension"] },
-  { label: "Travel", keywords: ["travel", "travelling","airline", "loyalty", "holiday", "aviation", "destination","transport","bus","train"] },
+  { label: "AI", keywords: ["artificial intelligence", "machine learning", "llm", "large language model", "generative ai", "prompt engineering", "neural network", "AI companion"] },
+  { label: "Videogames", keywords: ["video game", "videogame", "gaming", "game studio", "gameplay", "unity", "unreal engine","AAA", "godot", "player"] },
+  { label: "Gambling", keywords: ["gambling", "sports betting", "sportsbook", "betting", "casino", "igaming", "wagering", "iGaming"] },
+  { label: "Government", keywords: ["civil service", "government", "public sector", "regulatory agency", "ministry", "council", "HMRC"] },
+  { label: "Healthcare", keywords: ["health", "healthcare", "hospital", "patient", "medical", "clinical", "pharma", "medicine", "dental", "dentist"] },
+  { label: "Finance", keywords: ["money", "bank", "banking", "financial", "insurance", "retirement", "wealth", "pension"] },
+  { label: "Travel", keywords: ["travel", "travelling","airline", "flights", "loyalty", "holiday", "aviation", "destination","transport","bus","train"] },
   { label: "Retail", keywords: ["retail", "e-commerce", "ecommerce", "shopper", "merchandise", "consumer goods"] },
   { label: "Logistics", keywords: ["logistics", "fulfilment", "fulfillment", "delivery", "shipping", "supply chain"] },
   { label: "Education", keywords: ["education", "university", "student", "learning", "school", "academic"] },
   { label: "Consulting", keywords: ["consulting", "consultancy", "advisory","clients","client","client engagements", "professional services","agency"] },
   { label: "Media", keywords: ["media", "publishing", "journalism", "newsroom", "editorial", "broadcast"] },
   { label: "Telecom", keywords: ["telecom", "telecommunications", "mobile network", "broadband", "connectivity"] },
-  { label: "Energy", keywords: ["energy", "utilities", "power grid", "renewable", "electricity", "oil and gas"] },
+  { label: "Energy", keywords: ["energy", "utilities", "power grid", "renewable", "electricity", "oil and gas", "green"] },
   { label: "Tech", keywords: ["software", "saas", "platform", "developer tools", "cloud", "technology", "product engineering"] },
+  { label: "Property", keywords: ["real estate", "property", "housing", "residential", "proptech", "estate agency", "estate agencies", "letting", "lettings", "landlord", "tenant",],},
 ];
 
 export { INDUSTRY_LABELS };
@@ -863,31 +864,38 @@ async function appendToArchive(
   });
 }
 
-function matchesWholeKeyword(haystack: string, keyword: string): boolean {
+function countWholeKeywordMentions(haystack: string, keyword: string): number {
   const normalizedKeyword = normalizeText(keyword);
   if (!normalizedKeyword) {
-    return false;
+    return 0;
   }
 
-  // Split haystack into words and check for exact matches
-  // This avoids regex complexity and is more reliable
+  // Split haystack into words and count exact single-word hits.
   const words = haystack.split(/[^a-z0-9]+/).filter(Boolean);
-  
-  // For multi-word phrases, check if the haystack contains the phrase with word boundaries
+
+  // Multi-word phrases are counted with boundary-aware regex.
   if (normalizedKeyword.includes(" ")) {
-    // Use regex with properly escaped special chars for phrase matching
     const escapedKeyword = normalizedKeyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     try {
-      const pattern = new RegExp(`(?:^|[^a-z0-9])${escapedKeyword}(?:[^a-z0-9]|$)`);
-      return pattern.test(haystack);
+      const pattern = new RegExp(`(?:^|[^a-z0-9])${escapedKeyword}(?:[^a-z0-9]|$)`, "g");
+      return [...haystack.matchAll(pattern)].length;
     } catch {
-      // If regex fails, fall back to substring check
-      return haystack.includes(normalizedKeyword);
+      let count = 0;
+      let start = 0;
+      while (start < haystack.length) {
+        const index = haystack.indexOf(normalizedKeyword, start);
+        if (index === -1) {
+          break;
+        }
+        count += 1;
+        start = index + normalizedKeyword.length;
+      }
+
+      return count;
     }
   }
-  
-  // For single words, check if it's in the word list
-  return words.includes(normalizedKeyword);
+
+  return words.filter((word) => word === normalizedKeyword).length;
 }
 
 function dedupeResults(results: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
@@ -1072,11 +1080,26 @@ function inferIndustryLabel(row: Record<string, unknown>): string {
   }
 
   const scoredRules = INDUSTRY_RULES.map((rule) => {
-    const titleMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(title, keyword)).length;
-    const companyMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(company, keyword)).length;
-    const companyIndustryMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(companyIndustry, keyword)).length;
-    const companyDescriptionMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(companyDescription, keyword)).length;
-    const descriptionMatches = rule.keywords.filter((keyword) => matchesWholeKeyword(descriptionWithoutBenefits, keyword)).length;
+    const titleMatches = rule.keywords.reduce(
+      (total, keyword) => total + countWholeKeywordMentions(title, keyword),
+      0
+    );
+    const companyMatches = rule.keywords.reduce(
+      (total, keyword) => total + countWholeKeywordMentions(company, keyword),
+      0
+    );
+    const companyIndustryMatches = rule.keywords.reduce(
+      (total, keyword) => total + countWholeKeywordMentions(companyIndustry, keyword),
+      0
+    );
+    const companyDescriptionMatches = rule.keywords.reduce(
+      (total, keyword) => total + countWholeKeywordMentions(companyDescription, keyword),
+      0
+    );
+    const descriptionMatches = rule.keywords.reduce(
+      (total, keyword) => total + countWholeKeywordMentions(descriptionWithoutBenefits, keyword),
+      0
+    );
 
     const score =
       titleMatches * INDUSTRY_SCORE_WEIGHTS.title +
@@ -1178,7 +1201,9 @@ async function presentSearchResult(
         return accepted;
       }, [])
     : rawResults;
-  const enrichedResults = annotateDerivedFields(remoteFilteredResults);
+  // Hydrate from shared description cache first so industry inference can use it.
+  const hydratedRemoteResults = await hydrateDescriptionsFromCache(remoteFilteredResults);
+  const enrichedResults = annotateDerivedFields(hydratedRemoteResults);
   const titleFilteredResults = applyTitleFilters(enrichedResults, filters);
   const blacklistFilteredResults = applyCompanyBlacklist(titleFilteredResults, filters);
   const dedupedResults = dedupeResults(blacklistFilteredResults);
@@ -1186,8 +1211,7 @@ async function presentSearchResult(
   const resultsWithStatus = applyStoredStatuses(dedupedResults, statuses);
   const industryOverrides = await readIndustryOverrideStore();
   const resultsWithIndustry = applyStoredIndustryOverrides(resultsWithStatus, industryOverrides);
-  const resultsWithDescriptions = await hydrateDescriptionsFromCache(resultsWithIndustry);
-  enqueueDescriptionFetches(resultsWithDescriptions);
+  enqueueDescriptionFetches(resultsWithIndustry);
 
   const debug: SearchDebugStats | undefined = includeDebug
     ? {
@@ -1195,7 +1219,7 @@ async function presentSearchResult(
         remoteFilteredCount: remoteFilteredResults.length,
         titleFilteredCount: titleFilteredResults.length,
         dedupedCount: dedupedResults.length,
-        finalCount: resultsWithDescriptions.length,
+        finalCount: resultsWithIndustry.length,
         excludedByRemoteFilter: rawResults.length - remoteFilteredResults.length,
         excludedByTitleFilter: remoteFilteredResults.length - titleFilteredResults.length,
         removedByDedupe: blacklistFilteredResults.length - dedupedResults.length,
@@ -1212,8 +1236,8 @@ async function presentSearchResult(
   return {
     ...payload,
     rawResultCount,
-    results: resultsWithDescriptions,
-    resultCount: resultsWithDescriptions.length,
+    results: resultsWithIndustry,
+    resultCount: resultsWithIndustry.length,
     ...(debug ? { debug } : {}),
   };
 }

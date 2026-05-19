@@ -2,6 +2,30 @@
 
 This file is a dated running history of project changes and key decisions discussed in the repository.
 
+## 2026-05-19
+
+- Reduced LinkedIn repeat passes in `dashboard/src/lib/jobspy-service.ts` from a max of 3 runs to a fixed 2-run cap after timing showed the third pass was usually redundant for this config.
+- Lowered the default LinkedIn inter-page delay in `dashboard/scripts/jobspy_patches.py` from `1.0 + 1.5` jitter to `0.5 + 1.0` jitter based on the delay benchmark; this keeps throttle spacing but trims refresh latency.
+- Added reusable benchmark scripts under `dashboard/scripts/benchmarks/` plus a rerunnable benchmark runbook in `linkedin-benchmarking.md`.
+- Ran a CONFIG-driven search timing probe across all 7 search definitions and sites (`indeed`, `linkedin`, `glassdoor`) using `dashboard/scripts/run_jobspy_search.py` via the project venv interpreter.
+- Measured per-site wall time and runner-reported scrape time (`duration_seconds`) plus process overhead; observed LinkedIn as the dominant latency source (mean ~10.54s per invocation in this run, with higher variance than Indeed/Glassdoor).
+- Ran a full API refresh (`/api/searches?forceRefresh=true&debug=true`) to cross-check end-to-end latency; full refresh completed in ~48.83s with no search-level errors.
+- Ran a deeper LinkedIn-only instrumentation probe (requests, inter-page sleep, and `_process_job` timing) across representative searches (Scotland, Newcastle, London, UK Remote).
+- Finding: LinkedIn latency is primarily inter-page throttle sleep in `apply_linkedin_pagination_patch()` (`time.sleep(random.uniform(delay, delay + band_delay))`), not request parsing/processing; measured aggregate share in this probe was ~71% sleep, ~26% network request time.
+- Ran a delay sensitivity check on London (`results_wanted=60`): current patched delay settings (`1.0` + `1.5` band) took ~16.25s for 60 rows vs ~4.25s at zero delay with same row count, confirming throttle sleep as the main cost driver.
+- Ran a repeated LinkedIn delay/reliability benchmark across Scotland, London, and UK Remote comparing current settings (`1.0` + `1.5` band) with lower-delay profiles (`0.5` + `1.0`, and `0.3` + `0.7`).
+- In this benchmark, neither lower-delay profile showed 429/block signals or result-count loss across 9 runs each; `0.5` + `1.0` improved average runtime by ~31% vs current, while `0.3` + `0.7` improved it by ~43%.
+- Recommendation from this sample: `0.5` + `1.0` is the safer minimum to adopt first; `0.3` + `0.7` looks promising but is more aggressive and should be treated as a second-step tuning option if needed.
+
+- Updated `dashboard/scripts/jobspy_patches.py` and `dashboard/scripts/run_jobspy_search.py` so Indeed remote classification now uses structured Indeed attribute keys instead of JobSpy's description/location keyword heuristic.
+- Decision: `DSQF7` is treated as `Remote`, `PAXZC` as `Hybrid work`, and `SWG7T` as `In-person`; only rows with structured `DSQF7` now count as remote for JobDash filtering.
+- Updated industry scoring in `dashboard/src/lib/jobspy-service.ts` to count repeated whole-word keyword mentions instead of a binary per-keyword hit.
+- Decision: keep existing score thresholds and margin gates unchanged for now; only match counting behavior changed.
+- Reordered `presentSearchResult` in `dashboard/src/lib/jobspy-service.ts` so description cache hydration happens before industry inference.
+- Decision: industry labels now use the same shared description cache used by sidebar fetches, and only missing descriptions are queued in background to avoid duplicate loading paths.
+- Added `Property` to `dashboard/src/lib/industry-labels.ts` so it is a first-class selectable/persistable industry.
+- Expanded Property inference keywords in `dashboard/src/lib/jobspy-service.ts` (for example `estate agency`, `estate agencies`, `letting`, `lettings`, `landlord`, `tenant`) to improve confidence margins for PropTech/property listings without lowering global thresholds.
+
 ## 2026-05-18
 
 - Fixed an age fallback regression in `dashboard/src/app/page.tsx` where date-only `date_posted` rows were always using `first_seen_at`, making many rows appear as ~1 hour old.
