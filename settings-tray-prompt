@@ -1,0 +1,36 @@
+The settings are not a separate screen, but appear in a "tray" which is displayed beneath the Header when the user clicks on certain UI elements. This means we can add them to page.tsx directly and don't have to create a temporary page for the new design.
+
+The header now has two states (empty, for when the user encounters it for the first time, and full, for when they have provided some input). The Settings Tray has three states (one for showing global search settings, one for showing hybrid/in-person location settings, and one for showing remote location settings).
+
+The core design is here:
+https://www.figma.com/design/p23ucUwHJWj0GFs1MztvYk/Jobbity-Master-Design?node-id=136-4640&t=3Z9Zwr282NwIBZU0-4
+
+The different states for the Header are here:
+https://www.figma.com/design/p23ucUwHJWj0GFs1MztvYk/Jobbity-Master-Design?node-id=136-10578&t=3Z9Zwr282NwIBZU0-11
+
+The different states for the Settings Tray are here:
+https://www.figma.com/design/p23ucUwHJWj0GFs1MztvYk/Jobbity-Master-Design?node-id=138-11874&t=3Z9Zwr282NwIBZU0-11
+
+The behaviour is as follows. In the design ("Search Settings 1"):
+
+- When the user first encounters this screen the header should be in "Empty" state.
+- The input titled "Input-Keyword" is a text input that fills in search_term in the backend. Clicking on this also reveals the Settings Tray in the Header, set to the "Search Settings" tab.
+- Within this tab, the user has the following controls:
+- - "Select-Job Sites" - this is a multi-select dropdown menu that allows the user to pick any of the job sites (e.g. Glassdoor, Indeed) supported by JobSpy
+- - "Select-Age" - this is a single-select dropdown allowing the user to pick "24 hours", "7 days", or "14 days". This populates hours_old in the backend (so needs to be converted from days to hours)
+- - "Input-Include" is text input. The user can provide comma separated terms in quotation marks to supply keywords to include in the job title (replacing the "INCLUDE" section in CONFIG.MD's "FILTERS").
+- - "Input-Exclude" is text input. The user can provide comma separated terms in quotation marks to supply keywords to exclude in the job title (replacing the "EXCLUDE" section in CONFIG.MD's "FILTERS").
+- - "Input-Blacklist" is a text input. The user can provide comma separated terms in quotation marks to supply employers that should be excluded from search results, replacing the BLACKLIST in CONFIG.MD. 
+- - Underneath Input-Blacklist are Blacklist-Suggestions, which are a series of employer names as text links. Clicking on any of these adds that company to the "Input-Blacklist" input field (in quotation marks, as the user would input them) so that they can easily exclude commonly blacklisted employers.
+
+- The input titled Tab-Empty is a button that is a stand-in for the tabs once the user has provide initial input. Clicking on this button shows the Settings Tray on the Location/Hybrid tab.
+- Within this tab, the user has the following controls:
+- - "Radio-Group-Location-Type" is a radio button group with two options: "Hybrid/In-Person" and "Remote". By default it is set to "Hybrid/In-Person". Selecting "Remote" swaps the Settings Tray tab to the Location/Remote tab - from here, selecting "Hybrid/In-Person" sets it back to the Location/Hybrid tab.
+- - On the Location/Hybrid tab, the user has two further controls: "Input-Location" is a text input that allows the user specify the city and country to pass to the search (e.g. "Edinburgh, UK" or "Berlin, Germany") and "Input-Radius", which is a numeric input field for the radius of the search (in km) to pass to the backend. By default this is 0. Once the user has provided a location a tab should be added to the tab bar with this location as the name (not including any characters after the first comma). 
+- - On the Location/Remote tab, the user has one control: "Select-Country" is a single-select dropdown control containing a list of countries comptabile with JobSpy's Indeed/Glassdoor search. Once the user has selected a country, a tab should be added to the tab bar with this country as the name. 
+- - The user can continue adding additional locations by repeating this process
+
+- Once the user has inputted at least one keyword and at least one location (for Hybrid/In-person) or a country (for Remote) the Button-Search on the Header should be enabled. Clicking on this runs the search (replacing the current "Refresh" button)
+- When the user clicks the Button-Search button the Settings Tray should be hidden.
+- The user can click on either Input-Keyword or the Button-Add-Location button to display the Settings Tray again (NB: We need to add the ability for users to edit & delete locations later; not for now)
+

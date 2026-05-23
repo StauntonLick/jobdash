@@ -29,13 +29,14 @@ type SearchDebugStats = {
   includedByLinkedInRemoteFallback: number;
 };
 
-const CACHE_DIR = path.resolve(process.cwd(), ".cache", "searches");
-const ARCHIVE_DIR = path.resolve(process.cwd(), ".cache", "searches-archive");
-const STATUS_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-statuses.json");
-const INDUSTRY_OVERRIDE_STORE_PATH = path.resolve(process.cwd(), ".cache", "job-industry-overrides.json");
+const CACHE_BASE = path.resolve(process.cwd(), process.env.JOBDASH_CACHE_DIR ?? ".cache");
+const CACHE_DIR = path.join(CACHE_BASE, "searches");
+const ARCHIVE_DIR = path.join(CACHE_BASE, "searches-archive");
+const STATUS_STORE_PATH = path.join(CACHE_BASE, "job-statuses.json");
+const INDUSTRY_OVERRIDE_STORE_PATH = path.join(CACHE_BASE, "job-industry-overrides.json");
 const SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "run_jobspy_search.py");
 const DESCRIPTION_FETCH_SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "fetch_job_description.py");
-const DESCRIPTION_CACHE_PATH = path.resolve(process.cwd(), ".cache", "job-descriptions.json");
+const DESCRIPTION_CACHE_PATH = path.join(CACHE_BASE, "job-descriptions.json");
 const CACHE_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 const CACHE_RETENTION_DAYS = 14;
 const REFRESH_OVERLAP_HOURS = 4;

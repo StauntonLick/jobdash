@@ -1,5 +1,20 @@
-import fs from "node:fs/promises";
-import path from "node:path";
+/**
+ * search-config.ts
+ *
+ * Derives the runtime search definitions used by jobspy-service.ts from
+ * the persisted UserConfig (user-config.ts).
+ *
+ * The exported types (SearchDefinition, SearchFilters, SearchConfig) and the
+ * loadSearchConfig / loadSearchDefinitions entry-points are unchanged so that
+ * existing API routes and service code require no modification.
+ */
+
+import type { UserConfig, HybridLocation, RemoteLocation } from "@/lib/user-config";
+import { loadUserConfig } from "@/lib/user-config";
+
+// ---------------------------------------------------------------------------
+// Types (kept stable — consumed by jobspy-service.ts and the API routes)
+// ---------------------------------------------------------------------------
 
 export type SearchCriteriaValue = string | number | boolean | string[];
 
@@ -20,8 +35,9 @@ export type SearchConfig = {
   filters: SearchFilters;
 };
 
-// Points to the user-editable config file one level above the dashboard folder.
-const CONFIG_PATH = path.resolve(process.cwd(), "../CONFIG.MD");
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 function slugify(value: string): string {
   return value
@@ -30,186 +46,88 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-// Parse a JSON-style array string (e.g. '["indeed", "linkedin"]') into a string array.
-function parseArray(raw: string): string[] {
-  const normalized = raw
-    .replace(/'/g, '"')
-    .replace(/True/g, "true")
-    .replace(/False/g, "false");
-
-  try {
-    const parsed = JSON.parse(normalized);
-    return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
-  } catch {
-    return raw
-      .replace(/^[\[]|[\]]$/g, "")
-      .split(",")
-      .map((part) => part.trim().replace(/^['\"]|['\"]$/g, ""))
-      .filter(Boolean);
-  }
+/**
+ * Build the `search_term` string JobSpy expects from the user's keyword list.
+ * Each keyword is quoted; multiple keywords are joined with OR.
+ * Returns an empty string if there are no keywords (searches are skipped).
+ */
+function buildSearchTerm(keywords: string[]): string {
+  const clean = keywords.map((k) => k.trim()).filter(Boolean);
+  if (clean.length === 0) return "";
+  if (clean.length === 1) return `"${clean[0]}"`;
+  return `(${clean.map((k) => `"${k}"`).join(" OR ")})`;
 }
 
-// Convert a raw string value to the appropriate JS type (array, boolean, number, or string).
-function parseScalar(raw: string): SearchCriteriaValue {
-  const trimmed = raw.trim().replace(/,$/, "");
-
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return parseArray(trimmed);
-  }
-
-  if (/^(True|False)$/i.test(trimmed)) {
-    return /^True$/i.test(trimmed);
-  }
-
-  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
-    return Number(trimmed);
-  }
-
-  // Strip surrounding quotes from string values.
-  return trimmed
-    .replace(/^['\"]+/, "")
-    .replace(/['\"]+$/, "")
-    .replace(/,$/, "")
-    .trim();
+/**
+ * Build the shared base criteria from top-level UserConfig fields.
+ * These are merged into every per-location search.
+ */
+function buildBaseCriteria(
+  config: UserConfig
+): Record<string, SearchCriteriaValue> {
+  return {
+    site_name: config.sites,
+    search_term: buildSearchTerm(config.keywords),
+    results_wanted: config.resultsWanted,
+    hours_old: config.daysOld * 24,
+    linkedin_fetch_description: false,
+  };
 }
 
-// Parse the "## BASIC SETTINGS" section. Each line is a bullet like "- key=value".
-function parseBasicSettings(lines: string[]): Record<string, SearchCriteriaValue> {
-  const settings: Record<string, SearchCriteriaValue> = {};
-
-  for (const rawLine of lines) {
-    const bulletMatch = rawLine.trim().match(/^-\s+(.+)$/);
-    if (!bulletMatch) continue;
-
-    const item = bulletMatch[1].trim();
-    const equalsAt = item.indexOf("=");
-    if (equalsAt <= 0) continue;
-
-    const key = item.slice(0, equalsAt).trim();
-    const value = item.slice(equalsAt + 1).trim();
-    if (key && value) {
-      settings[key] = parseScalar(value);
-    }
-  }
-
-  return settings;
+function hybridToDefinition(
+  loc: HybridLocation,
+  base: Record<string, SearchCriteriaValue>
+): SearchDefinition {
+  return {
+    slug: slugify(loc.label),
+    title: loc.label,
+    criteria: {
+      ...base,
+      location: loc.city,
+      distance: loc.radiusKm,
+      country_indeed: loc.country,
+      is_remote: false,
+    },
+  };
 }
+
+function remoteToDefinition(
+  loc: RemoteLocation,
+  base: Record<string, SearchCriteriaValue>
+): SearchDefinition {
+  return {
+    slug: slugify(loc.label),
+    title: loc.label,
+    criteria: {
+      ...base,
+      location: loc.country,
+      country_indeed: loc.country,
+      is_remote: true,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export async function loadSearchConfig(): Promise<SearchConfig> {
-  const content = await fs.readFile(CONFIG_PATH, "utf8");
-  const lines = content.split(/\r?\n/);
+  const config = await loadUserConfig();
+  const base = buildBaseCriteria(config);
 
-  // Track which top-level section (##) and sub-section (###) we're currently in.
-  type TopSection = "basic" | "locations" | "filters" | null;
-  type LocationSub = "inperson" | "remote" | null;
-  type FilterSub = "include" | "exclude" | "blacklist" | null;
-
-  let topSection: TopSection = null;
-  let locationSub: LocationSub = null;
-  let filterSub: FilterSub = null;
-
-  // Accumulate raw lines for basic settings, and items for each list.
-  const basicLines: string[] = [];
-  const inPersonItems: string[] = [];
-  const remoteItems: string[] = [];
-  const includeTitleTerms: string[] = [];
-  const excludeTitleTerms: string[] = [];
-  const blacklistCompanies: string[] = [];
-
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-
-    // Detect top-level (##) section changes.
-    if (/^##\s+BASIC SETTINGS\s*$/i.test(line)) {
-      topSection = "basic"; locationSub = null; filterSub = null; continue;
-    }
-    if (/^##\s+LOCATIONS\s*$/i.test(line)) {
-      topSection = "locations"; locationSub = null; filterSub = null; continue;
-    }
-    if (/^##\s+FILTERS\s*$/i.test(line)) {
-      topSection = "filters"; locationSub = null; filterSub = null; continue;
-    }
-
-    // Detect sub-sections (###) within Locations.
-    if (topSection === "locations") {
-      if (/^###\s+In-Person/i.test(line)) { locationSub = "inperson"; continue; }
-      if (/^###\s+Remote Only/i.test(line)) { locationSub = "remote"; continue; }
-    }
-
-    // Detect sub-sections (###) within Filters.
-    if (topSection === "filters") {
-      if (/^###\s+INCLUDE\s*$/i.test(line)) { filterSub = "include"; continue; }
-      if (/^###\s+EXCLUDE\s*$/i.test(line)) { filterSub = "exclude"; continue; }
-      if (/^###\s+BLACKLIST\s*$/i.test(line)) { filterSub = "blacklist"; continue; }
-    }
-
-    // Collect bullet list items (lines starting with "- ").
-    const bulletMatch = line.match(/^-\s+(.+)$/);
-    if (!bulletMatch) continue;
-    const item = bulletMatch[1].trim();
-
-    if (topSection === "basic") {
-      basicLines.push(line); // Keep the full "- key=value" line for parseBasicSettings.
-    } else if (topSection === "locations") {
-      if (locationSub === "inperson") inPersonItems.push(item);
-      else if (locationSub === "remote") remoteItems.push(item);
-    } else if (topSection === "filters") {
-      if (filterSub === "include") includeTitleTerms.push(item);
-      else if (filterSub === "exclude") excludeTitleTerms.push(item);
-      else if (filterSub === "blacklist") blacklistCompanies.push(item);
-    }
-  }
-
-  // Parse the shared base criteria from Basic Settings.
-  const basicSettings = parseBasicSettings(basicLines);
-
-  const definitions: SearchDefinition[] = [];
-
-  // Build one search definition per in-person/hybrid/remote location.
-  // Each item has the format: "Location, Country, Distance"
-  for (const item of inPersonItems) {
-    const parts = item.split(",").map((p) => p.trim());
-    if (parts.length < 3) continue;
-
-    const [locationName, country, distanceStr] = parts;
-    const distance = Number(distanceStr);
-
-    definitions.push({
-      slug: slugify(locationName),
-      title: locationName,
-      criteria: {
-        ...basicSettings,
-        location: locationName,
-        distance: distance,
-        country_indeed: country,
-        is_remote: false,
-      },
-    });
-  }
-
-  // Build one search definition per remote-only region.
-  // Each item is just a region name (e.g. "UK", "Europe").
-  // The region name is used as both the location and country_indeed value.
-  for (const item of remoteItems) {
-    const region = item.trim();
-    if (!region) continue;
-
-    const title = `${region} Remote`;
-    definitions.push({
-      slug: slugify(title),
-      title,
-      criteria: {
-        ...basicSettings,
-        location: region,
-        country_indeed: region,
-        is_remote: true,
-      },
-    });
-  }
+  const definitions: SearchDefinition[] = config.locations.map((loc) =>
+    loc.type === "hybrid"
+      ? hybridToDefinition(loc, base)
+      : remoteToDefinition(loc, base)
+  );
 
   return {
     definitions,
-    filters: { includeTitleTerms, excludeTitleTerms, blacklistCompanies },
+    filters: {
+      includeTitleTerms: config.titleIncludes,
+      excludeTitleTerms: config.titleExcludes,
+      blacklistCompanies: config.employerBlacklist,
+    },
   };
 }
 

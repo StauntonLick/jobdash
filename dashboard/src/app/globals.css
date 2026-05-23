@@ -35,6 +35,12 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-control-foreground: var(--color-semantic-control-foreground);
+  --color-control-background: var(--color-semantic-control-background);
+  --color-control-active: var(--color-semantic-control-active);
+  --color-control-surface: var(--color-semantic-control-surface);
+  --color-control-strong: var(--color-semantic-control-strong);
+  --color-control-solid: var(--color-semantic-control-solid);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -69,10 +75,12 @@
   --color-brand-tertiary: #d9b993;
   --color-primitive-danger-d500: var(--color-brand-accent-primary);
   --color-primitive-neutral-black: #202020;
-  --color-primitive-neutral-neutral-background: var(--color-brand-quaternary);
+  --color-primitive-neutral-white: #FFFFFF;
+  /* --color-primitive-neutral-neutral-background: var(--color-brand-quaternary); */
+  --color-primitive-neutral-neutral-background: var(--color-primitive-neutral-white);
   --color-primitive-neutral-neutral-foreground: var(--color-brand-primary);
   --color-primitive-neutral-neutral-heavy: #d2ccc8;
-  --color-primitive-neutral-neutral-mid: #e2dbd4;
+  --color-primitive-neutral-neutral-mid: #E2DBD4;
   --color-primitive-neutral-white: #ffffff;
   --color-primitive-warning-w500: #ffbf00;
   --color-semantic-accent: var(--color-brand-accent-primary);
@@ -81,6 +89,16 @@
   --color-semantic-border: rgba(0, 0, 0, 0.08);
   --color-semantic-card: var(--color-primitive-neutral-neutral-mid);
   --color-semantic-card-foreground: var(--color-primitive-neutral-neutral-foreground);
+
+  --color-semantic-control-foreground: var(--color-primitive-neutral-neutral-foreground);
+  --color-semantic-control-background: rgba(255, 255, 255, 0.16);
+  --color-semantic-control-active: rgba(255, 255, 255, 0.48);
+  --color-semantic-control-surface: var(--color-brand-quaternary); /* #e2dbd4 */
+  --color-semantic-control-strong: rgba(255, 255, 255, 0.84);
+  --color-semantic-control-solid: #ffffff;
+  --color-semantic-control-hover: var(--color-semantic-control-active);
+  --color-semantic-control-border: #d2ccc8;
+
   --color-semantic-destructive: #d74343;
   --color-semantic-destructive-foreground: var(--color-primitive-neutral-white);
   --color-semantic-foreground: var(--color-primitive-neutral-neutral-foreground);
