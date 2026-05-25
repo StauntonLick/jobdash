@@ -1462,18 +1462,25 @@ export async function loadOrRunSearch(
   definition: SearchDefinition,
   forceRefresh = false,
   filters: SearchFilters = { includeTitleTerms: [], excludeTitleTerms: [], blacklistCompanies: [] },
-  includeDebug = false
+  includeDebug = false,
+  // When true, ignores the cached lastUpdated timestamp so the search covers the
+  // full hours_old period (used when the user changes search criteria).
+  // Existing cached results are still merged in afterwards to preserve known jobs.
+  useFullPeriod = false
 ): Promise<SearchResult> {
   const cached: SearchResult | null = await readCache(definition.slug);
 
-  if (!forceRefresh) {
+  if (!forceRefresh && !useFullPeriod) {
     if (cached && !isCacheStale(cached.lastUpdated)) {
       return await presentSearchResult(cached, filters, includeDebug);
     }
   }
 
   try {
-    const { results } = await runResilientSearch(definition, cached);
+    // Pass null for the cached value when useFullPeriod is set so that
+    // getIncrementalHours falls back to the full hours_old from criteria instead
+    // of computing a shorter window based on elapsed time since the last run.
+    const { results } = await runResilientSearch(definition, useFullPeriod ? null : cached);
     const mergedResults = mergeResults(cached?.results ?? [], results);
     const { active, archived } = splitActiveAndArchivedResults(mergedResults);
 

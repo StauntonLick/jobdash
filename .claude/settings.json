@@ -1,4 +1,18 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(python3 *)",
+      "Bash(python *)",
+      "Bash(npm run *)",
+      "Bash(npm test *)",
+      "Bash(npx *)",
+      "Bash(curl *)",
+      "Bash(node *)",
+      "Edit",
+      "Write",
+      "mkdir"
+    ]
+  },
   "mcpServers": {
     "figma": {
       "command": "npx",

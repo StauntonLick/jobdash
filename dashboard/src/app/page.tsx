@@ -36,6 +36,73 @@ type SearchData = {
   error?: string;
 };
 
+// ---------------------------------------------------------------------------
+// User config — mirrors the server-side UserConfig from @/lib/user-config.
+// Kept here as a plain type so the client component doesn't import Node.js code.
+// ---------------------------------------------------------------------------
+
+type UserConfigLocation =
+  | { id: string; type: "hybrid"; label: string; city: string; radiusKm: number; country: string }
+  | { id: string; type: "remote"; label: string; country: string };
+
+type UserConfig = {
+  keywords: string[];
+  sites: string[];
+  daysOld: number;
+  resultsWanted: number;
+  titleIncludes: string[];
+  titleExcludes: string[];
+  employerBlacklist: string[];
+  locations: UserConfigLocation[];
+};
+
+// Maps UI display names to the API site keys JobSpy understands, and back.
+const SITE_NAME_TO_KEY: Record<string, string> = {
+  LinkedIn: "linkedin",
+  Indeed: "indeed",
+  Glassdoor: "glassdoor",
+  ZipRecruiter: "zip_recruiter",
+  Google: "google",
+};
+const SITE_KEY_TO_NAME: Record<string, string> = Object.fromEntries(
+  Object.entries(SITE_NAME_TO_KEY).map(([name, key]) => [key, name])
+);
+
+// Maps the age-select display labels to daysOld config values.
+type AgeLabel = "24 hours" | "7 days" | "14 days";
+const DAYS_LABEL_TO_DAYS: Record<AgeLabel, number> = {
+  "24 hours": 1,
+  "7 days": 7,
+  "14 days": 14,
+};
+function daysToLabel(days: number): AgeLabel {
+  if (days <= 1) return "24 hours";
+  if (days <= 7) return "7 days";
+  return "14 days";
+}
+
+// Splits a comma-separated text input into a trimmed array, stripping surrounding
+// quotes so e.g. `"DataAnnotation", Prolific` → ["DataAnnotation", "Prolific"].
+function parseListInput(input: string): string[] {
+  return input
+    .split(",")
+    .map((s) => s.replace(/^["'\s]+|["'\s]+$/g, "").trim())
+    .filter(Boolean);
+}
+
+// Formats an array as a comma-separated string for display in text inputs.
+function formatListForDisplay(items: string[]): string {
+  return items.join(", ");
+}
+
+// Client-side slug — must match the server-side slugify in search-config.ts.
+function slugifyLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
 const STATUS_OPTIONS = ["New", "Skipped", "Applied", "Shortlist", "Longlist"] as const;
 type JobStatus = (typeof STATUS_OPTIONS)[number];
 
@@ -465,14 +532,18 @@ function TraySelectOption({
 // Pill-shaped select control that supports both single and multi-select behaviour.
 //   single — closes the dropdown when an item is picked; selected item cannot be deselected.
 //   multi  — keeps the dropdown open on each pick; picking a selected item deselects it.
+// Operates in controlled mode when `value` is provided (syncs to parent state),
+// or uncontrolled mode using `defaultValue` for initial state only.
 // onChange fires with the full selected array whenever the selection changes.
-// State is kept locally (not wired to search logic yet).
 function TraySelect({
   id,
   placeholder,
   options,
   type,
   defaultValue,
+  value: controlledValue,
+  searchable = false,
+  searchPlaceholder = "Search…",
   onChange,
 }: {
   id: string;
@@ -480,14 +551,31 @@ function TraySelect({
   options: string[];
   type: "single" | "multi";
   defaultValue?: string | string[];
+  /** When provided, the component operates in controlled mode — internal state
+   *  tracks this value and updates whenever it changes. */
+  value?: string | string[];
+  /** When true, shows a filter input at the top of the dropdown. Default false. */
+  searchable?: boolean;
+  /** Placeholder text for the search filter input. Only used when searchable={true}. */
+  searchPlaceholder?: string;
   onChange?: (selected: string[]) => void;
 }) {
   const [open, setOpen] = useState(false);
-  // Single-select stores one value; multi-select stores an array.
-  // Initialise with defaultValue if provided (accepts a single string or an array).
+  const [query, setQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // Seed internal state from controlledValue if provided, else from defaultValue.
+  const seed = controlledValue ?? defaultValue;
   const [selected, setSelected] = useState<string[]>(
-    defaultValue ? (Array.isArray(defaultValue) ? defaultValue : [defaultValue]) : []
+    seed ? (Array.isArray(seed) ? seed : [seed]) : []
   );
+
+  // When the parent updates controlledValue, keep internal state in sync.
+  useEffect(() => {
+    if (controlledValue !== undefined) {
+      setSelected(Array.isArray(controlledValue) ? controlledValue : [controlledValue]);
+    }
+  }, [controlledValue]);
 
   // Build the trigger label from current selection, or fall back to placeholder.
   const triggerLabel =
@@ -495,21 +583,40 @@ function TraySelect({
       ? placeholder
       : selected.join(", ");
 
+  // Filter options by the current query (case-insensitive substring).
+  const filteredOptions = query.trim()
+    ? options.filter((o) => o.toLowerCase().includes(query.toLowerCase()))
+    : options;
+
+  function openDropdown() {
+    setQuery("");
+    setOpen(true);
+    if (searchable) {
+      // Defer focus so the input is in the DOM before we focus it.
+      setTimeout(() => searchRef.current?.focus(), 0);
+    }
+  }
+
+  function closeDropdown() {
+    setOpen(false);
+    setQuery("");
+  }
+
   function handleSelect(option: string) {
     if (type === "single") {
       // Pick the item and close — cannot deselect.
       setSelected([option]);
-      setOpen(false);
+      closeDropdown();
       onChange?.([option]);
     } else {
       // Toggle the item; leave the dropdown open.
-      setSelected((prev) => {
-        const next = prev.includes(option)
-          ? prev.filter((o) => o !== option)
-          : [...prev, option];
-        onChange?.(next);
-        return next;
-      });
+      // Compute next outside the updater so onChange is never called inside a
+      // setState call — that would trigger React's "setState during render" warning.
+      const next = selected.includes(option)
+        ? selected.filter((o) => o !== option)
+        : [...selected, option];
+      setSelected(next);
+      onChange?.(next);
     }
   }
 
@@ -519,7 +626,7 @@ function TraySelect({
           No shadow on any state, matching the updated Figma Input/Select spec. */}
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => open ? closeDropdown() : openDropdown()}
         className={`
           flex h-9 w-full items-center justify-between rounded-full
           px-3
@@ -545,7 +652,7 @@ function TraySelect({
             className="fixed inset-0 z-40"
             onMouseDown={(e) => {
               e.nativeEvent.stopImmediatePropagation();
-              setOpen(false);
+              closeDropdown();
             }}
           />
 
@@ -559,15 +666,34 @@ function TraySelect({
               shadow-[0px_2px_4px_-2px_rgba(0,0,0,0.1),0px_4px_6px_-1px_rgba(0,0,0,0.1)]
             "
           >
-            <div className="max-h-48 overflow-y-auto flex flex-col gap-1 bg-control-surface [scrollbar-width:thin]">
-              {options.map((option) => (
-                <TraySelectOption
-                  key={option}
-                  label={option}
-                  selected={selected.includes(option)}
-                  onSelect={() => handleSelect(option)}
+            {/* Search filter input — only rendered when searchable={true} */}
+            {searchable && (
+              <div className="pb-1">
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="h-9 w-full rounded-full border border-black/8 bg-control-background px-3 text-sm font-light text-control-foreground placeholder:text-muted-foreground hover:bg-control-active focus:bg-control-active focus:border-black/32 focus:outline-none focus:ring-0"
                 />
-              ))}
+              </div>
+            )}
+
+            {/* Options list */}
+            <div className="max-h-48 overflow-y-auto flex flex-col gap-1 bg-control-surface [scrollbar-width:thin]">
+              {filteredOptions.length > 0 ? (
+                filteredOptions.map((option) => (
+                  <TraySelectOption
+                    key={option}
+                    label={option}
+                    selected={selected.includes(option)}
+                    onSelect={() => handleSelect(option)}
+                  />
+                ))
+              ) : (
+                <p className="px-2 py-2 text-xs text-muted-foreground">No results</p>
+              )}
             </div>
           </div>
         </>
@@ -612,18 +738,39 @@ function TraySection({
   );
 }
 
-// The "Search Settings" tab content — three columns: Sources, Job Titles, Employers.
+// The "Search Settings" tray content — three columns: Sources, Job Titles, Employers.
+// All values are controlled from the parent (Home) so they persist when the tray
+// is closed and re-opened, and so the Search button can read them to save the config.
 // onClose is called when the user clicks the × button to dismiss the tray.
-function SearchSettingsContent({ onClose }: { onClose: () => void }) {
-  // Controlled value for the "Exclude Employers" input.
-  const [excludeEmployers, setExcludeEmployers] = useState("");
-
-  // Appends a suggested employer name (wrapped in quotes) to the input, comma-separated.
+function SearchSettingsContent({
+  onClose,
+  sites,
+  daysLabel,
+  titleIncludes,
+  titleExcludes,
+  blacklist,
+  onSitesChange,
+  onDaysChange,
+  onTitleIncludesChange,
+  onTitleExcludesChange,
+  onBlacklistChange,
+}: {
+  onClose: () => void;
+  sites: string[];
+  daysLabel: string;
+  titleIncludes: string;
+  titleExcludes: string;
+  blacklist: string;
+  onSitesChange: (sites: string[]) => void;
+  onDaysChange: (label: string) => void;
+  onTitleIncludesChange: (value: string) => void;
+  onTitleExcludesChange: (value: string) => void;
+  onBlacklistChange: (value: string) => void;
+}) {
+  // Appends a suggested employer name (quoted, comma-separated) to the blacklist input.
   function appendEmployerSuggestion(name: string) {
-    setExcludeEmployers((prev) => {
-      const trimmed = prev.trim();
-      return trimmed ? `${trimmed}, "${name}"` : `"${name}"`;
-    });
+    const trimmed = blacklist.trim();
+    onBlacklistChange(trimmed ? `${trimmed}, "${name}"` : `"${name}"`);
   }
 
   return (
@@ -641,7 +788,8 @@ function SearchSettingsContent({ onClose }: { onClose: () => void }) {
               placeholder="LinkedIn, Indeed, Glassdoor"
               type="multi"
               options={["LinkedIn", "Indeed", "Glassdoor", "ZipRecruiter", "Google"]}
-              defaultValue={["LinkedIn", "Indeed", "Glassdoor"]}
+              value={sites}
+              onChange={onSitesChange}
             />
           </TrayFormItem>
           <TrayFormItem label="Posted in the last">
@@ -650,7 +798,8 @@ function SearchSettingsContent({ onClose }: { onClose: () => void }) {
               placeholder="Select…"
               type="single"
               options={["24 hours", "7 days", "14 days"]}
-              defaultValue="14 days"
+              value={daysLabel}
+              onChange={(selected) => onDaysChange(selected[0] ?? "14 days")}
             />
           </TrayFormItem>
         </TraySection>
@@ -658,10 +807,20 @@ function SearchSettingsContent({ onClose }: { onClose: () => void }) {
         {/* ── Column 2: Job Titles ── */}
         <TraySection icon={<IdCard className="h-5 w-5" />} heading="Job Titles">
           <TrayFormItem label="Job Title Includes">
-            <TrayInput id="input-include" placeholder={'e.g. "Design", "Content"'} />
+            <TrayInput
+              id="input-include"
+              placeholder={'e.g. "Design", "Content"'}
+              value={titleIncludes}
+              onChange={onTitleIncludesChange}
+            />
           </TrayFormItem>
           <TrayFormItem label="Job Title Excludes">
-            <TrayInput id="input-exclude" placeholder={'e.g. "Marketing"'} />
+            <TrayInput
+              id="input-exclude"
+              placeholder={'e.g. "Marketing"'}
+              value={titleExcludes}
+              onChange={onTitleExcludesChange}
+            />
           </TrayFormItem>
         </TraySection>
 
@@ -673,8 +832,8 @@ function SearchSettingsContent({ onClose }: { onClose: () => void }) {
               <TrayInput
                 id="input-blacklist"
                 placeholder={'e.g. "DataAnnotation"'}
-                value={excludeEmployers}
-                onChange={setExcludeEmployers}
+                value={blacklist}
+                onChange={onBlacklistChange}
               />
             </TrayFormItem>
             {/* Clicking a suggestion appends it (quoted, comma-separated) to the input above */}
@@ -834,6 +993,8 @@ function AddLocationDialog({
               options={[...INDEED_COUNTRIES]}
               type="single"
               defaultValue="United Kingdom"
+              searchable
+              searchPlaceholder="Search Countries"
               onChange={(selected) => {
                 if (selected[0]) setCountry(selected[0]);
               }}
@@ -844,6 +1005,7 @@ function AddLocationDialog({
         {/* Action buttons */}
         <div className="flex gap-2">
           <button
+            id="button-dialog-add-location"
             type="button"
             onClick={handleAdd}
             className="h-9 rounded-full bg-secondary px-4 text-sm font-light text-secondary-foreground shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:opacity-90"
@@ -1220,7 +1382,13 @@ function MobileJobList({
 export default function Home() {
   const [searches, setSearches] = useState<SearchData[]>([]);
   const [activeTab, setActiveTab] = useState<string>("");
-  const [keywordInput, setKeywordInput] = useState("");
+  // Note: the keyword input is intentionally uncontrolled (no useState) so that
+  // typing does not trigger a Home re-render. The ref gives us the current value
+  // whenever we need it (e.g. on Search click). See keywordInputRef below.
+  // keywordHasValue tracks only whether the field is empty or not — this is a
+  // boolean so it only causes a re-render when the user first types (false→true)
+  // or clears the field entirely (true→false), not on every character.
+  const [keywordHasValue, setKeywordHasValue] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -1228,29 +1396,28 @@ export default function Home() {
   const [selectedJobDescription, setSelectedJobDescription] = useState("");
   const [isDescriptionLoading, setIsDescriptionLoading] = useState(false);
 
-  // Draft tabs created by "Add Location" — UI-only, not yet backed by a real search.
-  // Each has a unique id and a title that updates as the user fills in the tray.
+  // ---------------------------------------------------------------------------
+  // Settings tray state — lifted here so values persist while the tray is closed
+  // and are readable by the Search button handler.
+  // Initialised to the defaults from user-config.ts; overwritten when the config
+  // loads from the API.
+  // ---------------------------------------------------------------------------
+  const [traySites, setTraySites] = useState<string[]>(["LinkedIn", "Indeed", "Glassdoor"]);
+  const [trayDaysLabel, setTrayDaysLabel] = useState<AgeLabel>("14 days");
+  const [trayTitleIncludes, setTrayTitleIncludes] = useState<string>("");
+  const [trayTitleExcludes, setTrayTitleExcludes] = useState<string>("");
+  const [trayBlacklist, setTrayBlacklist] = useState<string>("");
+
+  // The config as it was last saved — used to detect whether the user changed
+  // anything before clicking Search.
+  const [savedConfig, setSavedConfig] = useState<UserConfig | null>(null);
+
+  // Draft tabs created by "Add Location" — displayed immediately for feedback
+  // while the config saves and the search runs in the background.
   const [draftTabs, setDraftTabs] = useState<{ id: string; title: string }[]>([]);
 
   // Add Location dialog visibility.
   const [showAddLocationDialog, setShowAddLocationDialog] = useState(false);
-
-  // Called when the user confirms the Add Location dialog.
-  function handleAddLocation(
-    locationType: LocationType,
-    data: { city: string; radiusKm: number; country: string }
-  ) {
-    const id = `draft-${Date.now()}`;
-    let title = "New Location";
-    if (locationType === "hybrid" && data.city.trim()) {
-      title = truncateAtFirstComma(data.city.trim()) || "New Location";
-    } else if (locationType === "remote" && data.country) {
-      title = data.country;
-    }
-    setDraftTabs((prev) => [...prev, { id, title }]);
-    setActiveTab(id);
-    setShowAddLocationDialog(false);
-  }
 
   // Which settings tray is currently open, or null if closed.
   //   "search" — keyword search settings (triggered by the keyword input)
@@ -1269,29 +1436,67 @@ export default function Home() {
       const outsideKeyword = !keywordInputRef.current?.contains(target);
       const tabBar = document.getElementById("dashboard-tab-bar");
       const outsideTabBar = !tabBar?.contains(target);
-      if (outsideTray && outsideKeyword && outsideTabBar) {
+      // Exclude the search button: closing the tray on mousedown shifts the layout
+      // before click fires, which can suppress the click event entirely. The tray
+      // is closed explicitly inside handleSearch instead.
+      const searchButton = document.getElementById("button-search");
+      const outsideSearchButton = !searchButton?.contains(target);
+      if (outsideTray && outsideKeyword && outsideTabBar && outsideSearchButton && !showAddLocationDialog) {
         setActiveTray(null);
       }
     }
 
     document.addEventListener("mousedown", handleMouseDown);
     return () => document.removeEventListener("mousedown", handleMouseDown);
-  }, []);
+  }, [showAddLocationDialog]);
 
-  const loadSearches = useCallback(async (forceRefresh: boolean) => {
-    const response = await fetch(`/api/searches${forceRefresh ? "?forceRefresh=true" : ""}`, {
-      cache: "no-store",
-    });
-    const payload = (await response.json()) as {
-      searches?: SearchData[];
-      error?: string;
-    };
+  // Fetch searches from the API.
+  // forceRefresh=true bypasses the 4-hour stale cache check and re-runs every search.
+  // fullPeriod=true additionally ignores the cached lastUpdated so each search
+  // covers the full hours_old window — used when the user changes criteria.
+  const loadSearches = useCallback(async (forceRefresh: boolean, fullPeriod = false) => {
+    const params = new URLSearchParams();
+    if (forceRefresh) params.set("forceRefresh", "true");
+    if (fullPeriod)   params.set("fullPeriod", "true");
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+
+    const response = await fetch(`/api/searches${query}`, { cache: "no-store" });
+    const payload = (await response.json()) as { searches?: SearchData[]; error?: string };
 
     if (!response.ok) {
       throw new Error(payload.error ?? "Failed to load search data");
     }
 
     return payload.searches ?? [];
+  }, []);
+
+  // Load the persisted user config once on mount and use it to initialise the tray
+  // controls. Silently ignored if the config has never been saved yet.
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const response = await fetch("/api/user-config", { cache: "no-store" });
+        if (!response.ok) return;
+        const config = (await response.json()) as UserConfig;
+        setSavedConfig(config);
+        // Initialise keyword input and all tray controls from the loaded config.
+        // Set the uncontrolled input's DOM value directly — no state update needed.
+        if (keywordInputRef.current) {
+          keywordInputRef.current.value = formatListForDisplay(config.keywords);
+        }
+        setKeywordHasValue(config.keywords.length > 0);
+        setTraySites(
+          config.sites.map((key) => SITE_KEY_TO_NAME[key]).filter(Boolean)
+        );
+        setTrayDaysLabel(daysToLabel(config.daysOld));
+        setTrayTitleIncludes(formatListForDisplay(config.titleIncludes));
+        setTrayTitleExcludes(formatListForDisplay(config.titleExcludes));
+        setTrayBlacklist(formatListForDisplay(config.employerBlacklist));
+      } catch {
+        // Config load failures are non-fatal — tray stays at defaults.
+      }
+    };
+    void loadConfig();
   }, []);
 
   useEffect(() => {
@@ -1506,18 +1711,168 @@ export default function Home() {
     return selectedJobDescription;
   }, [selectedJobDescription, selectedJobRow]);
 
-  const refreshAll = async () => {
+  // ---------------------------------------------------------------------------
+  // Debug reset
+  // ---------------------------------------------------------------------------
+
+  // Clears all search state and tray inputs back to empty defaults, and writes
+  // the default config to the backend so the reset survives a page refresh.
+  async function handleResetDebug() {
+    // Reset the backend: wipes config to defaults and deletes all search cache files.
     try {
+      await fetch("/api/user-config", { method: "DELETE" });
+    } catch {
+      // Non-fatal — still reset the UI even if the backend call fails.
+    }
+
+    // Reset UI state.
+    if (keywordInputRef.current) {
+      keywordInputRef.current.value = "";
+    }
+    setKeywordHasValue(false);
+    setTraySites(["LinkedIn", "Indeed", "Glassdoor"]);
+    setTrayDaysLabel("14 days");
+    setTrayTitleIncludes("");
+    setTrayTitleExcludes("");
+    setTrayBlacklist("");
+    setSavedConfig(null);
+    setSearches([]);
+    setSelectedJob(null);
+    setError(null);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Search button handler
+  // ---------------------------------------------------------------------------
+
+  // Builds a partial UserConfig from the current tray + keyword state.
+  function buildCurrentConfig(): Partial<UserConfig> {
+    return {
+      keywords: parseListInput(keywordInputRef.current?.value ?? ""),
+      sites: traySites.map((name) => SITE_NAME_TO_KEY[name]).filter(Boolean),
+      daysOld: DAYS_LABEL_TO_DAYS[trayDaysLabel] ?? 14,
+      titleIncludes: parseListInput(trayTitleIncludes),
+      titleExcludes: parseListInput(trayTitleExcludes),
+      employerBlacklist: parseListInput(trayBlacklist),
+    };
+  }
+
+  // Returns true if any search-relevant field has changed vs. the last saved config.
+  // Sorting before comparison makes order irrelevant for sites and keywords.
+  // Returns true when savedConfig is null — we have no confirmed record of what the
+  // backend holds, so we always save before searching to avoid stale criteria.
+  function hasConfigChanged(): boolean {
+    if (!savedConfig) return true;
+    const current = buildCurrentConfig();
+    const sort = (arr: string[]) => [...arr].sort();
+
+    return (
+      JSON.stringify(sort(current.keywords ?? [])) !== JSON.stringify(sort(savedConfig.keywords)) ||
+      JSON.stringify(sort(current.sites ?? [])) !== JSON.stringify(sort(savedConfig.sites)) ||
+      (current.daysOld ?? 14) !== savedConfig.daysOld ||
+      JSON.stringify(current.titleIncludes ?? []) !== JSON.stringify(savedConfig.titleIncludes) ||
+      JSON.stringify(current.titleExcludes ?? []) !== JSON.stringify(savedConfig.titleExcludes) ||
+      JSON.stringify(sort(current.employerBlacklist ?? [])) !== JSON.stringify(sort(savedConfig.employerBlacklist))
+    );
+  }
+
+  // Clicking Search:
+  //   • If the user changed any setting → save the new config, then run a full-period
+  //     search so the new criteria are applied across the complete daysOld window.
+  //   • If nothing changed → run an incremental search that only fetches jobs posted
+  //     since the last update (the backend computes this automatically from the cache).
+  const handleSearch = async () => {
+    try {
+      setActiveTray(null);
       setRefreshingAll(true);
       setError(null);
-      const items = await loadSearches(true);
-      setSearches(items);
+
+      const changed = hasConfigChanged();
+
+      if (changed) {
+        // Save the updated config to the backend first.
+        const updatedFields = buildCurrentConfig();
+        const saveResponse = await fetch("/api/user-config", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updatedFields),
+        });
+        if (saveResponse.ok) {
+          const saved = (await saveResponse.json()) as UserConfig;
+          setSavedConfig(saved);
+        }
+        // Full-period search: re-fetch across the entire daysOld window.
+        const items = await loadSearches(true, true);
+        setSearches(items);
+        setDraftTabs([]);
+      } else {
+        // Incremental search: only since the last update.
+        const items = await loadSearches(true, false);
+        setSearches(items);
+        setDraftTabs([]);
+      }
     } catch (err) {
       setError(String(err));
     } finally {
       setRefreshingAll(false);
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Add Location
+  // ---------------------------------------------------------------------------
+
+  // Shows a draft tab for the new location and persists the config (including
+  // current keywords and filters). Does NOT run the search — the user triggers
+  // that explicitly via the Search button. Draft tabs are cleared by handleSearch
+  // once real search data arrives.
+  function handleAddLocation(
+    locationType: LocationType,
+    data: { city: string; radiusKm: number; country: string }
+  ) {
+    const id = `loc-${Date.now()}`;
+    let label = "New Location";
+
+    if (locationType === "hybrid" && data.city.trim()) {
+      label = truncateAtFirstComma(data.city.trim()) || "New Location";
+    } else if (locationType === "remote" && data.country) {
+      label = data.country;
+    }
+
+    const newLocation: UserConfigLocation =
+      locationType === "hybrid"
+        ? { id, type: "hybrid", label, city: data.city.trim(), radiusKm: data.radiusKm, country: data.country }
+        : { id, type: "remote", label, country: data.country };
+
+    const slug = slugifyLabel(label);
+
+    setDraftTabs((prev) => [...prev, { id: slug, title: label }]);
+    setActiveTab(slug);
+    setShowAddLocationDialog(false);
+
+    // Persist the full current config (keywords, sites, filters + new location)
+    // so the backend is ready when the user clicks Search.
+    void (async () => {
+      try {
+        const currentLocations = savedConfig?.locations ?? [];
+        const saveResponse = await fetch("/api/user-config", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...buildCurrentConfig(),
+            locations: [...currentLocations, newLocation],
+          }),
+        });
+        if (saveResponse.ok) {
+          const saved = (await saveResponse.json()) as UserConfig;
+          setSavedConfig(saved);
+        }
+      } catch (err) {
+        setError(String(err));
+        setDraftTabs((prev) => prev.filter((d) => d.id !== slug));
+      }
+    })();
+  }
 
   const updateJobStatus = async (statusKey: string, status: JobStatus) => {
     try {
@@ -1606,6 +1961,15 @@ export default function Home() {
           <div id="dashboard-header-inner" className="mx-auto max-w-[1280px] px-4 md:px-8 pt-8 pb-4">
             <div id="dashboard-title-row" className="mb-4 flex items-center justify-between gap-3">
               <h1 id="dashboard-title" className="font-heading text-6xl leading-none tracking-tight">jobbity.</h1>
+              <button
+                id="button-debug-reset"
+                type="button"
+                onClick={() => void handleResetDebug()}
+                title="Debug: reset all search state"
+                className="text-xs font-light text-white/40 hover:text-white/70 transition-opacity focus:outline-none"
+              >
+                reset
+              </button>
             </div>
 
             <div id="header-input-keyword-row" className="flex w-full items-center gap-3 overflow-x-auto whitespace-nowrap text-xl">
@@ -1615,9 +1979,13 @@ export default function Home() {
                 id="input-keyword"
                 ref={keywordInputRef}
                 type="text"
-                value={keywordInput}
-                onChange={(event) => setKeywordInput(event.target.value)}
                 onFocus={() => setActiveTray("search")}
+                onInput={(e) => {
+                  // Only update state when crossing the empty/non-empty boundary,
+                  // not on every keystroke — React bails out automatically for
+                  // identical boolean values so this is safe to call unconditionally.
+                  setKeywordHasValue((e.target as HTMLInputElement).value.trim().length > 0);
+                }}
                 placeholder="Enter job keywords"
                 className="h-9 w-[240px] shrink-0 rounded-full border border-black/8 bg-control-strong px-4 text-sm text-control-foreground placeholder:text-muted-foreground hover:bg-control-solid focus:bg-control-solid focus:border-black/32 focus:outline-none focus:ring-0"
               />
@@ -1662,13 +2030,19 @@ export default function Home() {
 
               <Button
                 id="button-search"
-                onClick={() => void refreshAll()}
-                disabled={refreshingAll}
+                onClick={() => void handleSearch()}
+                disabled={refreshingAll || !keywordHasValue || (searches.length === 0 && draftTabs.length === 0 && (savedConfig?.locations ?? []).length === 0)}
                 size="sm"
-                title={refreshTooltip}
-                className="relative h-9 w-9 shrink-0 rounded-full bg-white/20 p-0 text-transparent shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:bg-white/30 disabled:opacity-50"
+                title={
+                  !keywordHasValue
+                    ? "Enter a keyword to search"
+                    : searches.length === 0 && draftTabs.length === 0 && (savedConfig?.locations ?? []).length === 0
+                    ? "Add a location to search"
+                    : refreshTooltip
+                }
+                className="relative h-9 w-9 shrink-0 rounded-full bg-white p-0 text-transparent shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:bg-white/90"
               >
-                <Search className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 text-white" />
+                <Search className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 text-primary" />
                 <span className="sr-only">Search</span>
               </Button>
             </div>
@@ -1680,7 +2054,19 @@ export default function Home() {
           <section id="settings-tray" ref={settingsTrayRef} className="relative bg-control-surface shrink-0">
             <SettingsTrayPointer anchorId="input-keyword" />
             <div id="settings-tray-inner" className="mx-auto max-w-[1280px] px-4 md:px-8 py-6">
-              <SearchSettingsContent onClose={() => setActiveTray(null)} />
+              <SearchSettingsContent
+                onClose={() => setActiveTray(null)}
+                sites={traySites}
+                daysLabel={trayDaysLabel}
+                titleIncludes={trayTitleIncludes}
+                titleExcludes={trayTitleExcludes}
+                blacklist={trayBlacklist}
+                onSitesChange={setTraySites}
+                onDaysChange={(label) => setTrayDaysLabel(label as AgeLabel)}
+                onTitleIncludesChange={setTrayTitleIncludes}
+                onTitleExcludesChange={setTrayTitleExcludes}
+                onBlacklistChange={setTrayBlacklist}
+              />
             </div>
           </section>
         )}

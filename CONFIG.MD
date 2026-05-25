@@ -48,6 +48,7 @@ Jobs with titles containing the following will be excluded:
 - Management
 - Marketing
 - Kitchen
+- Tech Lead
 
 ### BLACKLIST
 Companies in this list will be excluded:

@@ -24,3 +24,32 @@
     cd "/Users/jonny/Coding Projects/JobDash/dashboard"
     npm run build
     npx pm2 restart jobdash
+
+## Tests
+
+Playwright E2E tests live in `dashboard/tests/e2e/`. There is one spec file per feature area:
+
+| File | Covers |
+|---|---|
+| `search-button.spec.ts` | Search button enabled/disabled logic |
+| `settings-tray.spec.ts` | Tray open/close triggers and field behaviour |
+| `add-location.spec.ts` | Add Location dialog, draft tabs, config save |
+| `search-execution.spec.ts` | Triggering searches, API calls, results rendering |
+| `debug-reset.spec.ts` | Reset button clearing UI and backend |
+
+Shared mock data and route helpers are in `tests/e2e/helpers.ts`.
+
+**Running tests:**
+```bash
+cd dashboard
+npm test               # headless, all tests
+npm run test:ui        # interactive Playwright UI (great for debugging)
+npm run test:report    # open the HTML report from the last run
+```
+
+**Rules for agents:**
+- Whenever a new user-facing feature is added, add corresponding tests to the relevant spec file (or create a new spec file if the feature doesn't fit any existing one).
+- Whenever existing behaviour is changed, update or remove any tests that covered the old behaviour and add tests for the new behaviour.
+- Tests use API route mocking via `mockAPIs()` in `helpers.ts` — no real Python searches are triggered during a test run. If a new API route is added, add a stub for it in `mockAPIs()`.
+- Use the `id` attributes on elements for selectors (e.g. `#button-search`) — they are stable and exist specifically to support testing. Avoid brittle text or class selectors where an id is available.
+- New mock data shapes (e.g. a new config field or a new API response) belong in `helpers.ts`, not inline in the spec file, so they can be reused.

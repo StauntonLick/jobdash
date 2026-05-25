@@ -1,0 +1,37 @@
+{
+  "keywords": [
+    "UX Designer"
+  ],
+  "sites": [
+    "linkedin",
+    "indeed",
+    "glassdoor"
+  ],
+  "daysOld": 14,
+  "resultsWanted": 60,
+  "titleIncludes": [
+    "Design"
+  ],
+  "titleExcludes": [],
+  "employerBlacklist": [
+    "A1"
+  ],
+  "locations": [
+    {
+      "id": "loc-1779725019595",
+      "type": "hybrid",
+      "label": "Edinburgh",
+      "city": "Edinburgh, UK",
+      "radiusKm": 10,
+      "country": "United Kingdom"
+    },
+    {
+      "id": "loc-1779725043978",
+      "type": "hybrid",
+      "label": "London",
+      "city": "London, UK",
+      "radiusKm": 10,
+      "country": "United Kingdom"
+    }
+  ]
+}
