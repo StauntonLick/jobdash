@@ -23,7 +23,8 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { INDUSTRY_LABELS } from "@/lib/industry-labels";
-import { INDEED_COUNTRIES } from "@/lib/location-constants";
+import { INDEED_COUNTRIES, POPULAR_CITIES } from "@/lib/location-constants";
+import type { LocationSuggestion } from "@/lib/location-constants";
 
 type SearchData = {
   slug: string;
@@ -79,6 +80,33 @@ function daysToLabel(days: number): AgeLabel {
   if (days <= 1) return "24 hours";
   if (days <= 7) return "7 days";
   return "14 days";
+}
+
+// Applies include/exclude title and employer-blacklist filters client-side.
+// Mirrors the server's applyTitleFilters + applyCompanyBlacklist logic exactly,
+// so behaviour is identical whether filtering happens here or on the server.
+function applyClientFilters(
+  results: Array<Record<string, unknown>>,
+  includeTerms: string[],
+  excludeTerms: string[],
+  blacklist: string[]
+): Array<Record<string, unknown>> {
+  const lowerIncludes = includeTerms.map((t) => t.toLowerCase());
+  const lowerExcludes = excludeTerms.map((t) => t.toLowerCase());
+  const lowerBlacklist = blacklist.map((n) => n.toLowerCase());
+
+  return results.filter((row) => {
+    const title = String(row.title ?? "").toLowerCase();
+    if (!title) return false;
+
+    const matchesInclude =
+      lowerIncludes.length === 0 || lowerIncludes.some((t) => title.includes(t));
+    const matchesExclude = lowerExcludes.some((t) => title.includes(t));
+    if (!matchesInclude || matchesExclude) return false;
+
+    const company = String(row.company ?? "").toLowerCase();
+    return !lowerBlacklist.some((n) => company.includes(n));
+  });
 }
 
 // Splits a comma-separated text input into a trimmed array, stripping surrounding
@@ -878,6 +906,179 @@ function SearchSettingsContent({
 
 type LocationType = "hybrid" | "remote";
 
+// Type-ahead city input that combines an instant static list with Photon
+// geocoding results loaded after a 350ms debounce.
+//
+// Props:
+//   inputValue  — controlled text shown in the input (may be a display string
+//                 like "Edinburgh, UK" after a suggestion is selected)
+//   onInputChange — called with raw text on every keystroke (free-form path)
+//   onSelect    — called with the full LocationSuggestion when the user picks
+//                 a suggestion from the dropdown; the parent is responsible for
+//                 updating inputValue via setCityInput(s.display).
+function LocationCombobox({
+  id,
+  inputValue,
+  onInputChange,
+  onSelect,
+}: {
+  id: string;
+  inputValue: string;
+  onInputChange: (text: string) => void;
+  onSelect: (suggestion: LocationSuggestion) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [apiSuggestions, setApiSuggestions] = useState<LocationSuggestion[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Derive static matches instantly — cities that start with the query first,
+  // then cities that merely contain it elsewhere.
+  const staticSuggestions = useMemo(() => {
+    const q = inputValue.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const startsWith = POPULAR_CITIES.filter((s) =>
+      s.city.toLowerCase().startsWith(q)
+    );
+    const contains = POPULAR_CITIES.filter(
+      (s) =>
+        !s.city.toLowerCase().startsWith(q) &&
+        s.display.toLowerCase().includes(q)
+    );
+    return [...startsWith, ...contains].slice(0, 6);
+  }, [inputValue]);
+
+  // Merge: static first, then Photon results that aren't already shown.
+  const suggestions = useMemo(() => {
+    const staticDisplays = new Set(staticSuggestions.map((s) => s.display));
+    const extra = apiSuggestions.filter((s) => !staticDisplays.has(s.display));
+    return [...staticSuggestions, ...extra].slice(0, 8);
+  }, [staticSuggestions, apiSuggestions]);
+
+  // Fire (debounced) Photon lookup whenever the input changes.
+  useEffect(() => {
+    const q = inputValue.trim();
+
+    if (q.length < 2) {
+      setApiSuggestions([]);
+      setIsLoading(false);
+      setOpen(false);
+      return;
+    }
+
+    setOpen(true);
+
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      setIsLoading(true);
+      try {
+        const res = await fetch(`/api/location-search?q=${encodeURIComponent(q)}`);
+        const data = (await res.json()) as { results?: LocationSuggestion[] };
+        setApiSuggestions(data.results ?? []);
+      } catch {
+        setApiSuggestions([]);
+      } finally {
+        setIsLoading(false);
+      }
+    }, 350);
+
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [inputValue]);
+
+  // Close on outside click.
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (!containerRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
+  function handleSelect(s: LocationSuggestion) {
+    // The parent updates inputValue via onSelect → setCityInput(s.display).
+    // We do NOT call onInputChange here so the parent's city state stays
+    // set to s.city (the clean name) rather than the display string.
+    onSelect(s);
+    setOpen(false);
+    setApiSuggestions([]);
+  }
+
+  const showDropdown =
+    open && inputValue.trim().length >= 2 && (suggestions.length > 0 || isLoading);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <input
+        id={id}
+        type="text"
+        autoComplete="off"
+        value={inputValue}
+        onChange={(e) => {
+          onInputChange(e.target.value);
+          // Clear stale Photon results immediately so they don't flash on the
+          // next open while the new debounce timer is still running.
+          setApiSuggestions([]);
+        }}
+        onFocus={() => {
+          if (inputValue.trim().length >= 2) setOpen(true);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setOpen(false);
+        }}
+        placeholder='e.g. "Edinburgh, UK"'
+        className="
+          h-9 w-full rounded-full
+          border border-black/8
+          bg-control-background
+          px-3
+          text-sm font-light text-control-foreground placeholder:text-muted-foreground
+          hover:bg-control-active
+          focus:bg-control-active focus:border-black/32 focus:outline-none focus:ring-0
+        "
+      />
+
+      {showDropdown && (
+        <div
+          className="
+            absolute left-0 top-full z-[70] mt-1 w-full min-w-max
+            rounded-2xl border border-black/8
+            bg-control-surface
+            p-1
+            shadow-[0px_2px_4px_-2px_rgba(0,0,0,0.1),0px_4px_6px_-1px_rgba(0,0,0,0.1)]
+          "
+        >
+          {suggestions.map((s) => (
+            <button
+              key={s.display}
+              type="button"
+              // onMouseDown + preventDefault keeps the input focused so blur
+              // doesn't fire before the click is registered.
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleSelect(s);
+              }}
+              className="flex w-full items-center gap-2 rounded-full px-2 py-1.5 text-left text-sm font-light text-primary hover:bg-black/5"
+            >
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              {s.display}
+            </button>
+          ))}
+          {isLoading && (
+            <p className="px-3 py-1.5 text-xs text-muted-foreground">
+              {suggestions.length === 0 ? "Searching…" : "Loading more…"}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One of the two large icon-buttons in the dialog's Option Group.
 function LocationOptionButton({
   locationType,
@@ -923,16 +1124,53 @@ function AddLocationDialog({
   onClose: () => void;
 }) {
   const [locationType, setLocationType] = useState<LocationType>("hybrid");
+
+  // cityInput — the text shown in the combobox input.
+  // When the user picks a suggestion it becomes the display string
+  // (e.g. "Edinburgh, UK"); when they type freely it's whatever they typed.
+  const [cityInput, setCityInput] = useState("");
+  // city — the clean city name stored for the search (e.g. "Edinburgh").
+  // Derived from the suggestion on selection, or falls back to cityInput.
   const [city, setCity] = useState("");
+
   const [radius, setRadius] = useState("10");
-  const [country, setCountry] = useState("United Kingdom");
+
+  // countryIndeed — the country_indeed value for hybrid searches.
+  // Auto-filled when a suggestion is selected; manually overridable via TraySelect.
+  const [countryIndeed, setCountryIndeed] = useState("United Kingdom");
+
+  // Separate country state for the remote flow (unchanged behaviour).
+  const [remoteCountry, setRemoteCountry] = useState("United Kingdom");
+
+  // Called when the user picks a suggestion from the combobox dropdown.
+  // Updates both the input display AND the derived city/country values.
+  function handleLocationSelect(s: LocationSuggestion) {
+    setCityInput(s.display);   // show "Edinburgh, UK" in the input
+    setCity(s.city);           // store "Edinburgh" for the search
+    setCountryIndeed(s.countryIndeed);
+  }
+
+  // Called on every free-form keystroke. Uses the raw text as the city
+  // fallback so the user can still add a city not in any suggestion list.
+  function handleCityInputChange(text: string) {
+    setCityInput(text);
+    setCity(text);
+  }
 
   function handleAdd() {
-    onAdd(locationType, {
-      city,
-      radiusKm: Number(radius) || 10,
-      country,
-    });
+    if (locationType === "hybrid") {
+      onAdd(locationType, {
+        city: (city || cityInput).trim(),
+        radiusKm: Number(radius) || 10,
+        country: countryIndeed,
+      });
+    } else {
+      onAdd(locationType, {
+        city: "",
+        radiusKm: 0,
+        country: remoteCountry,
+      });
+    }
   }
 
   return (
@@ -961,12 +1199,13 @@ function AddLocationDialog({
         {/* Fields — swap based on type */}
         {locationType === "hybrid" ? (
           <div className="flex flex-col gap-4">
+            {/* City combobox — suggests from static list instantly, Photon after 350ms */}
             <TrayFormItem label="City or Region">
-              <TrayInput
+              <LocationCombobox
                 id="dialog-city"
-                placeholder={'e.g. "Berlin, Germany"'}
-                value={city}
-                onChange={setCity}
+                inputValue={cityInput}
+                onInputChange={handleCityInputChange}
+                onSelect={handleLocationSelect}
               />
             </TrayFormItem>
             <TrayFormItem
@@ -996,7 +1235,7 @@ function AddLocationDialog({
               searchable
               searchPlaceholder="Search Countries"
               onChange={(selected) => {
-                if (selected[0]) setCountry(selected[0]);
+                if (selected[0]) setRemoteCountry(selected[0]);
               }}
             />
           </TrayFormItem>
@@ -1290,24 +1529,62 @@ function IndustryCell({
 }
 
 
-// Mobile-only card list – shown instead of the table on small screens
+// ---------------------------------------------------------------------------
+// Empty Search State
+// ---------------------------------------------------------------------------
+
+// Shown when no searches have been run yet — fills the remaining content area
+// and centres an illustration + two lines of muted copy.
+function EmptySearchState() {
+  return (
+    <div className="flex flex-1 flex-col items-center justify-center">
+      <div className="flex flex-col items-center gap-6">
+        {/* Illustration */}
+        <svg width="174" height="124" viewBox="0 0 174 124" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path d="M0 91.9113C0 91.9113 18.2514 79.55 65.3757 85.7305C112.5 91.9111 103.974 93.9119 128.237 94.4563C152.5 95.0007 174 85.7305 174 85.7305V105H0V91.9113Z" fill="#D2CCC8" fillOpacity="0.3"/>
+          <line x1="4.37114e-08" y1="104.5" x2="174" y2="104.5" stroke="#D2CCC8"/>
+          <path d="M0 91.8196C0 91.8196 16.4662 79.6016 58.9809 85.7105C101.496 91.8194 75.3323 104.209 156.98 104.757C238.628 105.304 0 104.757 0 104.757V91.8196Z" fill="#D2CCC8" fillOpacity="0.2"/>
+          <path d="M31 5.5C31 2.46243 33.4624 0 36.5 0C39.5376 0 42 2.46243 42 5.5V114C42 114 41 115.5 36.5 115.5C32 115.5 31 114 31 114V5.5Z" fill="#DBD6D3"/>
+          <path d="M128 26C128 22.134 131.134 19 135 19C138.866 19 142 22.134 142 26V122C142 122 142 124 135.5 124C129 124 128 122 128 122V26Z" fill="#D2CCC8"/>
+          <path d="M17 23V45C17 51.6274 22.3726 57 29 57H44C50.6274 57 56 51.6274 56 45V37.2955" stroke="#DBD6D3" strokeWidth="8" strokeLinecap="round"/>
+          <path d="M159 48V72C159 78.6274 153.627 84 147 84H123C116.373 84 111 78.6274 111 72V63.1364" stroke="#D2CCC8" strokeWidth="12" strokeLinecap="round"/>
+        </svg>
+
+        {/* Copy */}
+        <div className="flex flex-col items-center gap-2">
+          <h2 className="font-heading text-2xl font-normal tracking-[-0.036em] text-[#D2CCC8]">
+            Nothing to see yet.
+          </h2>
+          <p className="font-sans text-sm font-light leading-5 text-[#D2CCC8]">
+            Run a search to see some stuff.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Mobile-only card list – shown instead of the table on small screens.
+// `results` receives the already-client-filtered rows from the parent.
 function MobileJobList({
   search,
+  results,
   onOpenJob,
   onStatusChange,
 }: {
   search: SearchData;
+  results: Array<Record<string, unknown>>;
   onOpenJob: (searchSlug: string, statusKey: string) => void;
   onStatusChange: (statusKey: string, status: JobStatus) => void;
 }) {
   const sortedResults = useMemo(
     () =>
-      [...search.results].sort((a, b) => {
+      [...results].sort((a, b) => {
         const da = getSortTimestamp(a);
         const db = getSortTimestamp(b);
         return db - da;
       }),
-    [search.results]
+    [results]
   );
 
   if (sortedResults.length === 0) {
@@ -1552,16 +1829,37 @@ export default function Home() {
     return newest > 0 ? new Date(newest).toISOString() : null;
   }, [searches]);
 
+  // Parse the tray filter inputs into arrays once, so the filteredResultsMap memo
+  // only re-runs when the parsed content actually changes (not on every char typed).
+  const parsedIncludes = useMemo(() => parseListInput(trayTitleIncludes), [trayTitleIncludes]);
+  const parsedExcludes = useMemo(() => parseListInput(trayTitleExcludes), [trayTitleExcludes]);
+  const parsedBlacklist = useMemo(() => parseListInput(trayBlacklist), [trayBlacklist]);
+
+  // Client-side filtered results keyed by search slug.
+  // Re-computes instantly whenever the filter state or the raw results change —
+  // no network call required for filter-only changes.
+  const filteredResultsMap = useMemo(() => {
+    return new Map(
+      searches.map((search) => [
+        search.slug,
+        applyClientFilters(search.results, parsedIncludes, parsedExcludes, parsedBlacklist),
+      ])
+    );
+  }, [searches, parsedIncludes, parsedExcludes, parsedBlacklist]);
+
   const refreshTooltip = useMemo(() => {
     const rawTotal = searches.reduce(
       (sum, search) => sum + (Number.isFinite(search.rawResultCount) ? search.rawResultCount : search.resultCount),
       0
     );
-    const filteredTotal = searches.reduce((sum, search) => sum + search.resultCount, 0);
+    const filteredTotal = [...filteredResultsMap.values()].reduce(
+      (sum, results) => sum + results.length,
+      0
+    );
     const formattedDate = formatDateDdMmYyyyAtHhMm(globalLastUpdated);
 
     return `Last updated ${formattedDate}. ${rawTotal} jobs found, ${filteredTotal} after filters applied.`;
-  }, [globalLastUpdated, searches]);
+  }, [globalLastUpdated, searches, filteredResultsMap]);
 
   const selectedJobRow = useMemo(() => {
     if (!selectedJob) {
@@ -1757,11 +2055,24 @@ export default function Home() {
     };
   }
 
-  // Returns true if any search-relevant field has changed vs. the last saved config.
-  // Sorting before comparison makes order irrelevant for sites and keywords.
-  // Returns true when savedConfig is null — we have no confirmed record of what the
-  // backend holds, so we always save before searching to avoid stale criteria.
-  function hasConfigChanged(): boolean {
+  // Returns true if any field that drives what JobSpy fetches has changed vs. the
+  // last saved config (keywords, sites, date window). These require a fresh search.
+  // Returns true when savedConfig is null — no confirmed backend state.
+  function hasSearchCriteriaChanged(): boolean {
+    if (!savedConfig) return true;
+    const current = buildCurrentConfig();
+    const sort = (arr: string[]) => [...arr].sort();
+
+    return (
+      JSON.stringify(sort(current.keywords ?? [])) !== JSON.stringify(sort(savedConfig.keywords)) ||
+      JSON.stringify(sort(current.sites ?? [])) !== JSON.stringify(sort(savedConfig.sites)) ||
+      (current.daysOld ?? 14) !== savedConfig.daysOld
+    );
+  }
+
+  // Returns true if any config field (including filters) has changed.
+  // Used to decide whether we need to persist the config to the backend.
+  function hasAnyConfigChanged(): boolean {
     if (!savedConfig) return true;
     const current = buildCurrentConfig();
     const sort = (arr: string[]) => [...arr].sort();
@@ -1777,20 +2088,21 @@ export default function Home() {
   }
 
   // Clicking Search:
-  //   • If the user changed any setting → save the new config, then run a full-period
-  //     search so the new criteria are applied across the complete daysOld window.
-  //   • If nothing changed → run an incremental search that only fetches jobs posted
-  //     since the last update (the backend computes this automatically from the cache).
+  //   • Search criteria changed (keywords/sites/days) → save config + full re-fetch.
+  //   • Filter-only changed (include/exclude/blacklist) + results in memory → save
+  //     config only; client-side filters are already applied reactively, no fetch needed.
+  //   • Nothing changed → incremental refresh (new jobs since the last update).
   const handleSearch = async () => {
     try {
       setActiveTray(null);
       setRefreshingAll(true);
       setError(null);
 
-      const changed = hasConfigChanged();
+      const criteriaChanged = hasSearchCriteriaChanged();
+      const anyChanged = hasAnyConfigChanged();
 
-      if (changed) {
-        // Save the updated config to the backend first.
+      // Persist the config whenever anything changed.
+      if (anyChanged) {
         const updatedFields = buildCurrentConfig();
         const saveResponse = await fetch("/api/user-config", {
           method: "PATCH",
@@ -1801,9 +2113,16 @@ export default function Home() {
           const saved = (await saveResponse.json()) as UserConfig;
           setSavedConfig(saved);
         }
+      }
+
+      if (criteriaChanged) {
         // Full-period search: re-fetch across the entire daysOld window.
         const items = await loadSearches(true, true);
         setSearches(items);
+        setDraftTabs([]);
+      } else if (anyChanged && searches.length > 0) {
+        // Only display filters changed and results are already in memory.
+        // The filteredResultsMap updates reactively — no network call needed.
         setDraftTabs([]);
       } else {
         // Incremental search: only since the last update.
@@ -2000,7 +2319,7 @@ export default function Home() {
                       value={search.slug}
                       className="!flex-none h-[29px] rounded-full border border-[var(--color-semantic-border)] px-4 py-1 text-sm font-light tracking-[-0.168px] text-[var(--color-semantic-control-foreground)] bg-transparent hover:bg-[var(--color-semantic-control-active)] hover:text-[var(--color-semantic-control-foreground)] data-active:bg-[var(--color-semantic-primary)] data-active:text-[var(--color-semantic-primary-foreground)] data-active:border-[var(--color-semantic-border)] data-active:shadow-[0px_1px_1.5px_rgba(0,0,0,0.1)]"
                     >
-                      {search.title} ({search.resultCount})
+                      {search.title} ({filteredResultsMap.get(search.slug)?.length ?? search.resultCount})
                     </TabsTrigger>
                   ))}
 
@@ -2111,14 +2430,16 @@ export default function Home() {
                     <div className="min-w-[1100px]">
                       <Table id={`search-results-body-table-${search.slug}`} className="table-fixed">
                         <TableBody id={`search-results-body-${search.slug}`}>
-                          {search.results.length === 0 ? (
+                          {(() => {
+                            const filteredResults = filteredResultsMap.get(search.slug) ?? search.results;
+                            return filteredResults.length === 0 ? (
                             <TableRow id={`search-results-empty-row-${search.slug}`}>
                               <TableCell colSpan={VISIBLE_COLUMNS.length} className="px-2 text-sm text-card-foreground">
                                 No jobs found for this search.
                               </TableCell>
                             </TableRow>
                           ) : (
-                            [...search.results]
+                            [...filteredResults]
                               .sort((a, b) => {
                                 const da = getSortTimestamp(a);
                                 const db = getSortTimestamp(b);
@@ -2189,7 +2510,8 @@ export default function Home() {
                                   ))}
                                 </TableRow>
                               ))
-                          )}
+                          )
+                          })()}
                         </TableBody>
                       </Table>
 
@@ -2197,7 +2519,7 @@ export default function Home() {
                         id={`search-results-filter-summary-${search.slug}`}
                         className="px-2 pt-3 pb-6 text-sm font-light italic text-muted-foreground"
                       >
-                        {Math.max(0, search.rawResultCount - search.resultCount)} jobs hidden by filters
+                        {Math.max(0, search.results.length - (filteredResultsMap.get(search.slug)?.length ?? search.results.length))} jobs hidden by filters
                       </p>
                     </div>
                   </ScrollArea>
@@ -2207,6 +2529,7 @@ export default function Home() {
                 <div id={`mobile-results-wrap-${search.slug}`} className="md:hidden h-full min-h-0 flex-1 overflow-y-auto">
                   <MobileJobList
                     search={search}
+                    results={filteredResultsMap.get(search.slug) ?? search.results}
                     onOpenJob={(searchSlug, statusKey) => setSelectedJob({ searchSlug, statusKey })}
                     onStatusChange={(statusKey, nextStatus) => void updateJobStatus(statusKey, nextStatus)}
                   />
@@ -2216,7 +2539,7 @@ export default function Home() {
               </TabsContent>
             ))}
 
-            {!activeSearch ? <p id="dashboard-no-searches" className="px-6 py-3 text-sm text-muted-foreground">No searches available.</p> : null}
+            {!activeSearch ? <EmptySearchState /> : null}
           </div>
         </section>
 

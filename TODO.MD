@@ -3,7 +3,9 @@
 ## Features
 
 Filter by status
+Add canonical location type-ahead for input field
+Add empty search state
+Add search in progress feedback
 
 ## Bugs
 
-Hybrid results are being returned from Glassdoor/Indeed - make sure the location overrides any cues in the text

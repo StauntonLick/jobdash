@@ -9,27 +9,15 @@
   ],
   "daysOld": 14,
   "resultsWanted": 60,
-  "titleIncludes": [
-    "Design"
-  ],
+  "titleIncludes": [],
   "titleExcludes": [],
-  "employerBlacklist": [
-    "A1"
-  ],
+  "employerBlacklist": [],
   "locations": [
     {
-      "id": "loc-1779725019595",
+      "id": "loc-1779793791621",
       "type": "hybrid",
       "label": "Edinburgh",
-      "city": "Edinburgh, UK",
-      "radiusKm": 10,
-      "country": "United Kingdom"
-    },
-    {
-      "id": "loc-1779725043978",
-      "type": "hybrid",
-      "label": "London",
-      "city": "London, UK",
+      "city": "Edinburgh",
       "radiusKm": 10,
       "country": "United Kingdom"
     }

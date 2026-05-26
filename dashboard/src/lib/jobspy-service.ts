@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-import type { SearchDefinition, SearchFilters } from "@/lib/search-config";
+import type { SearchDefinition } from "@/lib/search-config";
 import { INDUSTRY_LABELS } from "@/lib/industry-labels";
 
 export type SearchResult = {
@@ -953,41 +953,6 @@ function dedupeResults(results: Array<Record<string, unknown>>): Array<Record<st
   return Array.from(merged.values());
 }
 
-function applyTitleFilters(
-  results: Array<Record<string, unknown>>,
-  filters: SearchFilters
-): Array<Record<string, unknown>> {
-  const includeTerms = filters.includeTitleTerms.map((term) => term.toLowerCase());
-  const excludeTerms = filters.excludeTitleTerms.map((term) => term.toLowerCase());
-
-  return results.filter((row) => {
-    const title = String(row.title ?? "").toLowerCase();
-
-    if (!title) {
-      return false;
-    }
-
-    const matchesInclude =
-      includeTerms.length === 0 || includeTerms.some((term) => title.includes(term));
-    const matchesExclude = excludeTerms.some((term) => title.includes(term));
-
-    return matchesInclude && !matchesExclude;
-  });
-}
-
-// Remove any jobs from companies that appear in the blacklist (case-insensitive).
-function applyCompanyBlacklist(
-  results: Array<Record<string, unknown>>,
-  filters: SearchFilters
-): Array<Record<string, unknown>> {
-  const blacklist = (filters.blacklistCompanies ?? []).map((name) => name.toLowerCase());
-  if (blacklist.length === 0) return results;
-
-  return results.filter((row) => {
-    const company = String(row.company ?? "").toLowerCase();
-    return !blacklist.some((name) => company.includes(name));
-  });
-}
 
 function shouldEnforceRemoteOnly(criteria: SearchDefinition["criteria"]): boolean {
   const remoteSetting = criteria.is_remote;
@@ -1171,7 +1136,6 @@ function applyStoredIndustryOverrides(
 
 async function presentSearchResult(
   payload: SearchResult,
-  filters: SearchFilters,
   includeDebug = false
 ): Promise<SearchResult> {
   let linkedInRemoteFallbackCount = 0;
@@ -1205,9 +1169,9 @@ async function presentSearchResult(
   // Hydrate from shared description cache first so industry inference can use it.
   const hydratedRemoteResults = await hydrateDescriptionsFromCache(remoteFilteredResults);
   const enrichedResults = annotateDerivedFields(hydratedRemoteResults);
-  const titleFilteredResults = applyTitleFilters(enrichedResults, filters);
-  const blacklistFilteredResults = applyCompanyBlacklist(titleFilteredResults, filters);
-  const dedupedResults = dedupeResults(blacklistFilteredResults);
+  // Title-include / title-exclude / employer-blacklist filtering is handled
+  // entirely on the client so that filter changes are instant without a re-fetch.
+  const dedupedResults = dedupeResults(enrichedResults);
   const statuses = await readStatusStore();
   const resultsWithStatus = applyStoredStatuses(dedupedResults, statuses);
   const industryOverrides = await readIndustryOverrideStore();
@@ -1218,12 +1182,12 @@ async function presentSearchResult(
     ? {
         rawCount: rawResults.length,
         remoteFilteredCount: remoteFilteredResults.length,
-        titleFilteredCount: titleFilteredResults.length,
+        titleFilteredCount: remoteFilteredResults.length,
         dedupedCount: dedupedResults.length,
         finalCount: resultsWithIndustry.length,
         excludedByRemoteFilter: rawResults.length - remoteFilteredResults.length,
-        excludedByTitleFilter: remoteFilteredResults.length - titleFilteredResults.length,
-        removedByDedupe: blacklistFilteredResults.length - dedupedResults.length,
+        excludedByTitleFilter: 0,
+        removedByDedupe: enrichedResults.length - dedupedResults.length,
         includedByLinkedInRemoteFallback: linkedInRemoteFallbackCount,
       }
     : undefined;
@@ -1365,7 +1329,22 @@ async function runResilientSearch(
   const baseCriteria = definition.criteria;
   const requestedSites = normalizeSites(baseCriteria.site_name);
   const sites = requestedSites.length > 0 ? requestedSites : ["indeed", "linkedin", "glassdoor"];
-  const hoursOld = getIncrementalHours(baseCriteria, cached?.lastUpdated);
+
+  // If the cache is empty or too sparse relative to what was requested, treat it
+  // as if it has no timestamp — this forces a full-period search rather than an
+  // incremental window.  Without this, a cache reset to near-zero results would
+  // keep the incremental window tiny on every subsequent refresh (e.g. 4 hours
+  // elapsed + 4 hour overlap = 8 hours), permanently locking the result count at
+  // a low value even though older results are available on the job sites.
+  //
+  // Threshold: if fewer than 25 % of requested results are cached, the cache is
+  // treated as sparse and gets a full-period scan.  Healthy caches (≥ 25 %)
+  // continue to use the incremental window as normal.
+  const resultsWanted = Math.max(1, Number(baseCriteria.results_wanted) || 60);
+  const isCacheSparse =
+    !cached?.results?.length ||
+    cached.results.length < Math.ceil(resultsWanted * 0.25);
+  const hoursOld = getIncrementalHours(baseCriteria, isCacheSparse ? undefined : cached?.lastUpdated);
 
   async function runSiteSearch(site: string): Promise<Array<Record<string, unknown>>> {
     const siteCriteria: SearchDefinition["criteria"] = {
@@ -1461,7 +1440,6 @@ async function runResilientSearch(
 export async function loadOrRunSearch(
   definition: SearchDefinition,
   forceRefresh = false,
-  filters: SearchFilters = { includeTitleTerms: [], excludeTitleTerms: [], blacklistCompanies: [] },
   includeDebug = false,
   // When true, ignores the cached lastUpdated timestamp so the search covers the
   // full hours_old period (used when the user changes search criteria).
@@ -1472,7 +1450,7 @@ export async function loadOrRunSearch(
 
   if (!forceRefresh && !useFullPeriod) {
     if (cached && !isCacheStale(cached.lastUpdated)) {
-      return await presentSearchResult(cached, filters, includeDebug);
+      return await presentSearchResult(cached, includeDebug);
     }
   }
 
@@ -1496,15 +1474,14 @@ export async function loadOrRunSearch(
 
     await writeCache(payload);
     await appendToArchive(definition.slug, definition.title, archived);
-    return await presentSearchResult(payload, filters, includeDebug);
+    return await presentSearchResult(payload, includeDebug);
   } catch (error) {
     if (cached) {
       return await presentSearchResult(
         {
-        ...cached,
-        error: String(error),
+          ...cached,
+          error: String(error),
         },
-        filters,
         includeDebug
       );
     }
@@ -1518,6 +1495,6 @@ export async function loadOrRunSearch(
       resultCount: 0,
       lastUpdated: new Date().toISOString(),
       error: String(error),
-    }, filters, includeDebug);
+    }, includeDebug);
   }
 }

@@ -10,11 +10,12 @@ export async function GET(request: NextRequest) {
     // fullPeriod=true: ignore cached lastUpdated so each search covers the full
     // hours_old window. Used when the user changes search criteria.
     const fullPeriod = request.nextUrl.searchParams.get("fullPeriod") === "true";
-    const { definitions, filters } = await loadSearchConfig();
+    const { definitions } = await loadSearchConfig();
 
     // Searches run in parallel to keep full refresh latency down.
+    // Title/blacklist filters are now applied client-side; the server sends all rows.
     const searches = await Promise.all(
-      definitions.map((def) => loadOrRunSearch(def, forceRefresh || fullPeriod, filters, includeDebug, fullPeriod))
+      definitions.map((def) => loadOrRunSearch(def, forceRefresh || fullPeriod, includeDebug, fullPeriod))
     );
 
     return NextResponse.json({ searches });

@@ -8,12 +8,14 @@ import pandas as pd
 from jobspy import scrape_jobs
 
 from jobspy_patches import (
+    apply_glassdoor_location_lookup_patch,
     apply_glassdoor_partial_error_patch,
     apply_indeed_structured_work_mode_patch,
     apply_linkedin_pagination_patch,
 )
 
 
+apply_glassdoor_location_lookup_patch()
 apply_glassdoor_partial_error_patch()
 apply_indeed_structured_work_mode_patch()
 apply_linkedin_pagination_patch()

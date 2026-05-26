@@ -1,7 +1,112 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
+from urllib.parse import quote
+
+
+def apply_glassdoor_location_lookup_patch() -> None:
+    """
+    Fix two bugs in Glassdoor._get_location that cause HTTP 400 for US city searches.
+
+    Bug 1 — double-slash URL:
+        base_url is stored as "https://www.glassdoor.com/" (trailing slash), and
+        _get_location constructs f"{self.base_url}/findPopularLocationAjax.htm",
+        which produces "https://www.glassdoor.com//findPopularLocationAjax.htm".
+        The TLS client used by Glassdoor does not normalise // in URL paths the
+        way browsers do, so the double slash is sent literally. www.glassdoor.com
+        returns 400 for this path; non-US Glassdoor endpoints are more lenient.
+
+    Bug 2 — no session warmup:
+        The existing flow visits only /Job/computer-science-jobs.htm to get the
+        CSRF token, but skips the homepage. www.glassdoor.com requires cookies
+        set by the homepage before the location-lookup AJAX endpoint will respond
+        with 200. Non-US endpoints are again more lenient on this.
+
+    The patch:
+        • Strips the trailing slash from base_url before constructing the URL.
+        • Visits the Glassdoor homepage to seed session cookies before the first
+          location lookup on each Glassdoor instance.
+        • Retries up to 2 times on non-200 / non-429 responses, with a brief
+          delay and a fresh homepage visit between attempts.
+        • URL-encodes the location term explicitly (requests already does this,
+          but being explicit avoids any tls_client edge-cases).
+    """
+    try:
+        import jobspy.glassdoor as glassdoor_module
+        from jobspy.glassdoor import Glassdoor
+    except Exception:
+        return
+
+    if getattr(Glassdoor, "_location_lookup_patch_applied", False):
+        return
+
+    log = glassdoor_module.log
+
+    def _patched_get_location(
+        self: Any, location: str, is_remote: bool
+    ) -> tuple[Any, Any]:
+        if not location or is_remote:
+            return "11047", "STATE"  # unchanged — remote/no-location fast-path
+
+        base = self.base_url.rstrip("/")  # fix Bug 1: strip trailing slash
+        url = f"{base}/findPopularLocationAjax.htm?maxLocationsToReturn=10&term={quote(location)}"
+
+        for attempt in range(3):
+            # Bug 2 fix: seed cookies with a homepage visit on first attempt and
+            # each retry.  A real browser always loads the root page first.
+            try:
+                self.session.get(f"{base}/", timeout=10)
+            except Exception:
+                pass  # don't abort — proceed and let the real request fail loudly
+
+            if attempt > 0:
+                delay = attempt * 3  # 3 s, 6 s
+                log.info(f"Glassdoor location lookup retry {attempt}/2 in {delay}s")
+                time.sleep(delay)
+
+            try:
+                res = self.session.get(url)
+            except Exception as exc:
+                log.error(f"Glassdoor location lookup request error: {exc}")
+                if attempt == 2:
+                    return None, None
+                continue
+
+            if res.status_code == 200:
+                try:
+                    items = res.json()
+                except Exception:
+                    log.error("Glassdoor: location response was not valid JSON")
+                    if attempt == 2:
+                        return None, None
+                    continue
+
+                if not items:
+                    raise ValueError(f"Location '{location}' not found on Glassdoor")
+
+                raw_type = items[0]["locationType"]
+                location_type = {"C": "CITY", "S": "STATE", "N": "COUNTRY"}.get(
+                    raw_type, raw_type
+                )
+                return int(items[0]["locationId"]), location_type
+
+            elif res.status_code == 429:
+                log.error("429 Response — Glassdoor: too many requests")
+                return None, None
+
+            else:
+                log.warning(
+                    f"Glassdoor location lookup: HTTP {res.status_code} "
+                    f"(attempt {attempt + 1}/3)"
+                )
+
+        log.error("Glassdoor: location not parsed after 3 attempts")
+        return None, None
+
+    Glassdoor._get_location = _patched_get_location  # type: ignore[assignment]
+    Glassdoor._location_lookup_patch_applied = True
 
 
 def apply_glassdoor_partial_error_patch() -> None:

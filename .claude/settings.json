@@ -8,9 +8,10 @@
       "Bash(npx *)",
       "Bash(curl *)",
       "Bash(node *)",
+      "Bash(find *)",
+      "Bash(git show *)",
       "Edit",
-      "Write",
-      "mkdir"
+      "Write"
     ]
   },
   "mcpServers": {
