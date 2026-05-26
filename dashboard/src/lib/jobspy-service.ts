@@ -1459,7 +1459,19 @@ export async function loadOrRunSearch(
     // getIncrementalHours falls back to the full hours_old from criteria instead
     // of computing a shorter window based on elapsed time since the last run.
     const { results } = await runResilientSearch(definition, useFullPeriod ? null : cached);
-    const mergedResults = mergeResults(cached?.results ?? [], results);
+
+    // If the search_term has changed since the cache was last written (e.g. the
+    // user updated their keywords), old cached results were fetched with a different
+    // query and should not be merged in — they would contaminate the new results.
+    // This also auto-clears any cache that was written before keywords were first
+    // configured (search_term "" → "UX Designer") or when the search_term format
+    // changed (quoted "\"UX Designer\"" → unquoted "UX Designer").
+    const cachedSearchTerm = String(cached?.criteria?.search_term ?? "");
+    const currentSearchTerm = String(definition.criteria.search_term ?? "");
+    const searchTermChanged = cachedSearchTerm !== currentSearchTerm;
+    const previousResults = searchTermChanged ? [] : (cached?.results ?? []);
+
+    const mergedResults = mergeResults(previousResults, results);
     const { active, archived } = splitActiveAndArchivedResults(mergedResults);
 
     const payload: SearchResult = {

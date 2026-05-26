@@ -48,14 +48,19 @@ function slugify(value: string): string {
 
 /**
  * Build the `search_term` string JobSpy expects from the user's keyword list.
- * Each keyword is quoted; multiple keywords are joined with OR.
- * Returns an empty string if there are no keywords (searches are skipped).
+ * Multiple keywords are joined with OR.  Keywords are intentionally NOT
+ * wrapped in double-quotes: quoted phrase syntax ("UX Designer") causes
+ * LinkedIn's guest API to silently fall back to returning all local jobs
+ * when it cannot match the exact phrase, whereas unquoted keywords trigger
+ * LinkedIn's semantic matching (which is what we want — allowing through
+ * "Product Designer", "UX Researcher", "User-Centred Designer", etc.).
+ * Returns an empty string if there are no keywords.
  */
 function buildSearchTerm(keywords: string[]): string {
   const clean = keywords.map((k) => k.trim()).filter(Boolean);
   if (clean.length === 0) return "";
-  if (clean.length === 1) return `"${clean[0]}"`;
-  return `(${clean.map((k) => `"${k}"`).join(" OR ")})`;
+  if (clean.length === 1) return clean[0];
+  return clean.join(" OR ");
 }
 
 /**

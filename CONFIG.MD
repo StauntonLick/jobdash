@@ -33,8 +33,8 @@ Jobs with titles containing the following will be included:
 - User Experience
 - User
 - Product
-- Designer
-- Researcher
+- Design
+- Research
 
 ### EXCLUDE
 Jobs with titles containing the following will be excluded:
