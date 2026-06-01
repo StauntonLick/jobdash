@@ -83,8 +83,6 @@ function daysToLabel(days: number): AgeLabel {
 }
 
 // Applies include/exclude title and employer-blacklist filters client-side.
-// Mirrors the server's applyTitleFilters + applyCompanyBlacklist logic exactly,
-// so behaviour is identical whether filtering happens here or on the server.
 function applyClientFilters(
   results: Array<Record<string, unknown>>,
   includeTerms: string[],
@@ -1666,6 +1664,10 @@ export default function Home() {
   // boolean so it only causes a re-render when the user first types (false→true)
   // or clears the field entirely (true→false), not on every character.
   const [keywordHasValue, setKeywordHasValue] = useState(false);
+  // Persisted so the uncontrolled input gets the right defaultValue when it
+  // remounts after the loading spinner (which unmounts the input before the
+  // config fetch has a chance to set keywordInputRef.current.value).
+  const [savedKeywords, setSavedKeywords] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingAll, setRefreshingAll] = useState(false);
@@ -1757,7 +1759,10 @@ export default function Home() {
         const config = (await response.json()) as UserConfig;
         setSavedConfig(config);
         // Initialise keyword input and all tray controls from the loaded config.
-        // Set the uncontrolled input's DOM value directly — no state update needed.
+        setSavedKeywords(config.keywords);
+        // Set the uncontrolled input's DOM value directly if it is already
+        // mounted; if not (e.g. still behind the loading spinner), defaultValue
+        // on the input will pick up savedKeywords when it mounts.
         if (keywordInputRef.current) {
           keywordInputRef.current.value = formatListForDisplay(config.keywords);
         }
@@ -2298,6 +2303,7 @@ export default function Home() {
                 id="input-keyword"
                 ref={keywordInputRef}
                 type="text"
+                defaultValue={formatListForDisplay(savedKeywords)}
                 onFocus={() => setActiveTray("search")}
                 onInput={(e) => {
                   // Only update state when crossing the empty/non-empty boundary,

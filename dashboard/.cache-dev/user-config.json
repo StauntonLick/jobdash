@@ -1,6 +1,8 @@
 {
   "keywords": [
-    "UX\" OR \"Product Designer\" OR \"User Researcher"
+    "UX",
+    "Product Designer",
+    "User Researcher"
   ],
   "sites": [
     "linkedin",
@@ -9,7 +11,9 @@
   ],
   "daysOld": 14,
   "resultsWanted": 60,
-  "titleIncludes": [],
+  "titleIncludes": [
+    "Design"
+  ],
   "titleExcludes": [],
   "employerBlacklist": [],
   "locations": [
