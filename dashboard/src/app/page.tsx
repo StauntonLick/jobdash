@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Check, ChevronDown, ExternalLink, Globe, IdCard, MapPin, Plus, Search, X } from "lucide-react";
+import { Building2, Check, ChevronDown, ExternalLink, Globe, IdCard, Loader2, MapPin, Plus, Search, X } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -25,6 +25,15 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { INDUSTRY_LABELS } from "@/lib/industry-labels";
 import { INDEED_COUNTRIES, POPULAR_CITIES } from "@/lib/location-constants";
 import type { LocationSuggestion } from "@/lib/location-constants";
+
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
 
 type SearchData = {
   slug: string;
@@ -1834,11 +1843,16 @@ export default function Home() {
     return newest > 0 ? new Date(newest).toISOString() : null;
   }, [searches]);
 
-  // Parse the tray filter inputs into arrays once, so the filteredResultsMap memo
+  // Debounce filter inputs so the table only re-filters after the user pauses typing.
+  const debouncedTitleIncludes = useDebounce(trayTitleIncludes, 300);
+  const debouncedTitleExcludes = useDebounce(trayTitleExcludes, 300);
+  const debouncedBlacklist = useDebounce(trayBlacklist, 300);
+
+  // Parse the debounced tray filter inputs into arrays once, so the filteredResultsMap memo
   // only re-runs when the parsed content actually changes (not on every char typed).
-  const parsedIncludes = useMemo(() => parseListInput(trayTitleIncludes), [trayTitleIncludes]);
-  const parsedExcludes = useMemo(() => parseListInput(trayTitleExcludes), [trayTitleExcludes]);
-  const parsedBlacklist = useMemo(() => parseListInput(trayBlacklist), [trayBlacklist]);
+  const parsedIncludes = useMemo(() => parseListInput(debouncedTitleIncludes), [debouncedTitleIncludes]);
+  const parsedExcludes = useMemo(() => parseListInput(debouncedTitleExcludes), [debouncedTitleExcludes]);
+  const parsedBlacklist = useMemo(() => parseListInput(debouncedBlacklist), [debouncedBlacklist]);
 
   // Client-side filtered results keyed by search slug.
   // Re-computes instantly whenever the filter state or the raw results change —
@@ -2296,7 +2310,7 @@ export default function Home() {
               </button>
             </div>
 
-            <div id="header-input-keyword-row" className="flex w-full items-center gap-3 overflow-x-auto whitespace-nowrap text-xl">
+            <div id="header-input-keyword-row" className="flex w-full items-center gap-3 overflow-x-auto overflow-y-hidden whitespace-nowrap text-xl [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <span id="header-find-label" className="shrink-0 text-lg leading-none">Find</span>
               <label htmlFor="input-keyword" className="sr-only">Search keyword</label>
               <input
@@ -2367,7 +2381,10 @@ export default function Home() {
                 }
                 className="relative h-9 w-9 shrink-0 rounded-full bg-white p-0 text-transparent shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:bg-white/90"
               >
-                <Search className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 text-primary" />
+                {refreshingAll
+                  ? <Loader2 className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 animate-spin text-primary" />
+                  : <Search className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 text-primary" />
+                }
                 <span className="sr-only">Search</span>
               </Button>
             </div>
