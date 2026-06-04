@@ -1,5 +1,37 @@
 # JobDash History
 #
+## 2026-06-04 (2)
+
+- Updated **search results filter controls** in `dashboard/src/app/page.tsx` to match revised Figma design (node 273-5483 / mini button spec 270-5164):
+  - **MiniButton & MiniButtonDropdown styling**: added `border border-muted`, replaced `bg-transparent` with `bg-control-background`, changed font from `text-sm font-light` to `text-xs font-normal`, reduced icons from 20px to 16px (`h-5 w-5` → `h-4 w-4`).
+  - **Controls layout**: moved mini buttons to the left of the metadata count text (previously right); added `gap-2` between buttons; metadata text color updated from `text-primary` to `text-muted-foreground`.
+  - **Label**: renamed "Delete Search" → "Delete Location" to match Figma copy.
+  - Changes applied to both real-search panels and draft-tab panels. All 43 tests pass.
+
+## 2026-06-04
+
+- Updated **header controls** in `dashboard/src/app/page.tsx` to match revised Figma design (node 136-10578 / button spec 11-89):
+  - **Settings tray trigger moved**: clicking `Input-Keyword` no longer opens the settings tray. A new `Button-Settings` (SlidersHorizontal icon, `id="button-settings"`) now toggles it, and is only rendered when tabs exist (searches or draft tabs).
+  - **Add Location button relocated**: removed from inside `TabsList`; now a standalone `Button-Add-Location` (`id="button-add-location"`) placed after the tab bar. Shows `+ Add Location` text when no tabs are present; icon only when tabs exist.
+  - **Search button updated**: `Button-Search` now shows the Search icon + "Search" text (was icon-only). Replaced the shadcn `<Button>` wrapper with a plain `<button>` styled to match the button spec (semi-transparent pill, white semibold text).
+  - **Tab bar is now conditional**: only rendered when searches or draft tabs exist.
+  - Removed `Button` import from `@/components/ui/button`; added `SlidersHorizontal` to lucide-react imports.
+  - Added `button-settings` and `button-add-location` to the outside-click exclusion list so mousedown on these buttons doesn't close the tray before their click handlers fire.
+  - Updated `SettingsTrayPointer` anchor from `input-keyword` to `button-settings`.
+  - Updated all affected E2E tests (`settings-tray.spec.ts`, `add-location.spec.ts`, `search-execution.spec.ts`, `debug-reset.spec.ts`). All 43 tests pass.
+
+## 2026-06-03
+
+- Added **Search Title** section to each search tab panel in `dashboard/src/app/page.tsx` (Figma node 270-4893). Each panel now shows: location heading (`{city}, {country}` for hybrid, `{country}` for remote), a metadata line, and three mini-button controls. Draft tabs (not yet searched) show "No jobs to display" for metadata; real searches show `{n} jobs` or `{n} jobs, {m} hidden by filters` depending on filter state.
+- Added **`MiniButton`** and **`MiniButtonDropdown`** components matching the Figma mini-button spec (node 270-5164): no background at rest with a subtle drop shadow; `bg-control-active` + box shadow on hover; `bg-neutral-mid` on press. All three controls use this style.
+- Added **radius mini-button** (hybrid tabs only): opens a dropdown with options "Exact location only", "10km", "20km", "50km", "100km". Numeric selections display as "Within Xkm" on the button trigger. Selecting a new value PATCHes `radiusKm` to `/api/user-config` without auto-triggering a search.
+- Added **Disable / Enable Filters toggle**: `SlidersHorizontal` icon + "Disable Filters" by default; switches to `Eye` icon + "Enable Filters" when active. Filter state is per-tab, session-only (`filtersDisabledTabs: Set<string>`). When disabled, `filteredResultsMap` bypasses `applyClientFilters` for that slug and the metadata shows the unfiltered total count.
+- Added **Delete Search** mini-button: removes the tab from `searches`/`draftTabs`, removes the location from `savedConfig.locations`, PATCHes config, and switches the active tab to the next available one.
+- Updated **Add Location dialog**: the Search Radius field is now a `TraySelect` dropdown (options: "Exact location only", "10km", "20km", "50km", "100km") instead of a free-text input. Added shared `RADIUS_OPTIONS`, `radiusKmToOption`, `radiusOptionToKm`, and `radiusButtonLabel` helpers.
+- Added explicit **draft tab `TabsContent` panels** so each draft tab renders its own Search Title (with all three controls) above the `EmptySearchState`. The global `EmptySearchState` now only renders when both `searches` and `draftTabs` are empty.
+- Removed the old per-search filter-summary footer ("X jobs hidden by filters") from the scroll area — this information is now shown in the Search Title metadata line.
+- Added `Eye`, `SlidersHorizontal`, `Trash2` to lucide-react imports. All 43 existing tests pass.
+
 ## 2026-05-22
 
 - Made `TraySelect` search opt-in via a `searchable` prop (default `false`): only the Country select in the Add Location dialog has `searchable` — "Job Sites" and "Posted in the last" are unaffected. Updated the search input to match the Figma On=Light Input spec: `h-9`, `rounded-full`, `bg-control-background` at rest, `bg-control-active` on hover/focus, `border-black/8` at rest, `border-black/32` on focus, Nunito Light 14px, `text-control-foreground`, `placeholder:text-muted-foreground`, no focus ring. Auto-focus is also gated on `searchable`.

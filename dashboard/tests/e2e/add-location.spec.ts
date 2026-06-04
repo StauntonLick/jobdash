@@ -16,7 +16,7 @@ test.describe("Add Location dialog", () => {
     await mockAPIs(page, { config: EMPTY_CONFIG, searches: [] });
     await goto(page);
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await expect(page.getByRole("heading", { name: "Add Location" })).toBeVisible();
   });
 
@@ -24,7 +24,7 @@ test.describe("Add Location dialog", () => {
     await mockAPIs(page, { config: EMPTY_CONFIG, searches: [] });
     await goto(page);
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await page.getByRole("button", { name: "Cancel" }).click();
     await expect(page.getByRole("heading", { name: "Add Location" })).not.toBeAttached();
   });
@@ -33,7 +33,7 @@ test.describe("Add Location dialog", () => {
     await mockAPIs(page, { config: EMPTY_CONFIG, searches: [] });
     await goto(page);
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await expect(page.getByRole("heading", { name: "Add Location" })).toBeVisible();
     // Click the top-left corner of the screen — outside the dialog card.
     await page.mouse.click(10, 10);
@@ -52,7 +52,7 @@ test.describe("Add Location dialog", () => {
     });
     await goto(page);
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await page.locator("#dialog-city").fill("Edinburgh");
     await page.locator("#button-dialog-add-location").click();
 
@@ -74,7 +74,7 @@ test.describe("Add Location dialog", () => {
 
     const countAfterLoad = searchCallCount;
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await page.locator("#dialog-city").fill("Edinburgh");
     await page.locator("#button-dialog-add-location").click();
 
@@ -98,7 +98,7 @@ test.describe("Add Location dialog", () => {
     // Ensure keyword is set (config loaded it, but let's be explicit).
     await page.locator("#input-keyword").fill("UX Designer");
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await page.locator("#dialog-city").fill("Edinburgh");
     await page.locator("#button-dialog-add-location").click();
 
@@ -124,7 +124,7 @@ test.describe("Add Location dialog", () => {
 
     await expect(page.locator("#button-search")).toBeDisabled();
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await page.locator("#dialog-city").fill("Edinburgh");
     await page.locator("#button-dialog-add-location").click();
 
@@ -136,7 +136,7 @@ test.describe("Add Location dialog", () => {
     await mockAPIs(page, { config: EMPTY_CONFIG, searches: [] });
     await goto(page);
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     // Hybrid is the default — city and radius inputs should be visible.
     await expect(page.locator("#dialog-city")).toBeVisible();
     await expect(page.locator("#dialog-radius")).toBeVisible();
@@ -147,7 +147,7 @@ test.describe("Add Location dialog", () => {
     await mockAPIs(page, { config: EMPTY_CONFIG, searches: [] });
     await goto(page);
 
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     // Switch to Remote.
     await page.getByRole("button", { name: /remote/i }).click();
     await expect(page.locator("#dialog-country")).toBeVisible();

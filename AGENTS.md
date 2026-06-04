@@ -3,7 +3,7 @@
 ## General Guidelines
 
 - This is a personal project and will be shared for free on Github, so all code should be open-source friendly and free of any proprietary or licensed content.
-- Ask clarifying questions before following a command if there is key information missing from the prompt or context.
+- Ask clarifying questions before following a command.
 - After carrying out an action, add a record of it to HISTORY.MD. If the change is rolled back, remove that record.
 - Always ask questions prior to carrying out an action if you are unsure of the request. Do not guess.
 

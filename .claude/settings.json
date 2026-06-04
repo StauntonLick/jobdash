@@ -1,28 +1,27 @@
 {
+  "enableAllProjectMcpServers": true,
   "permissions": {
     "allow": [
-      "Bash(python3 *)",
-      "Bash(python *)",
+      "Bash(python3 - *)",
+      "Bash(python3 /tmp/*)",
       "Bash(npm run *)",
       "Bash(npm test *)",
       "Bash(npx *)",
       "Bash(curl *)",
-      "Bash(node *)",
+      "Bash(node /tmp/*)",
       "Bash(find *)",
+      "Bash(ls *)",
       "Bash(git show *)",
+      "Bash(cat *)",
+      "Bash(grep *)",
       "Edit",
       "Write"
     ]
   },
   "mcpServers": {
     "figma": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "figma-developer-mcp",
-        "--stdio"
-      ],
-      "env": {}
+      "url": "https://mcp.figma.com/mcp",
+      "type": "http"
     }
   }
 }

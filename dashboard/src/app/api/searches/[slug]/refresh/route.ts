@@ -18,7 +18,8 @@ export async function POST(_request: NextRequest, { params }: Params) {
       return NextResponse.json({ error: `Unknown search: ${slug}` }, { status: 404 });
     }
 
-    const search = await loadOrRunSearch(definition, true, includeDebug);
+    const fullPeriod = _request.nextUrl.searchParams.get("fullPeriod") === "true";
+    const search = await loadOrRunSearch(definition, true, includeDebug, fullPeriod);
     return NextResponse.json({ search });
   } catch (error) {
     return NextResponse.json(

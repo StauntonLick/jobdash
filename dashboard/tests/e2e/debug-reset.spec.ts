@@ -98,7 +98,7 @@ test.describe("Debug reset button", () => {
     await goto(page);
 
     // Open tray to confirm filters were loaded.
-    await page.locator("#input-keyword").click();
+    await page.locator("#button-settings").click();
     await expect(page.locator("#input-include")).toHaveValue("Product Designer");
 
     // Close tray, reset.
@@ -106,7 +106,12 @@ test.describe("Debug reset button", () => {
     await page.locator("#button-debug-reset").click();
 
     // Reopen tray — fields should be empty.
-    await page.locator("#input-keyword").click();
+    // After reset, tabs are cleared so #button-settings no longer exists;
+    // add a location first to restore the button, then reopen the tray.
+    await page.locator("#button-add-location").click();
+    await page.locator("#dialog-city").fill("Edinburgh");
+    await page.locator("#button-dialog-add-location").click();
+    await page.locator("#button-settings").click();
     await expect(page.locator("#input-include")).toHaveValue("");
     await expect(page.locator("#input-exclude")).toHaveValue("");
     await expect(page.locator("#input-blacklist")).toHaveValue("");

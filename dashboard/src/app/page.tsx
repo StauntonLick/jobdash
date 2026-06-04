@@ -1,11 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, Check, ChevronDown, ExternalLink, Globe, IdCard, MapPin, Plus, Search, X } from "lucide-react";
+import { Building2, Check, ChevronDown, ExternalLink, Eye, EyeOff, Globe, IdCard, Loader2, MapPin, Plus, Search, Settings2, Trash2, X } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -122,6 +121,30 @@ function formatListForDisplay(items: string[]): string {
 }
 
 // Client-side slug — must match the server-side slugify in search-config.ts.
+// ---------------------------------------------------------------------------
+// Search radius options — shared between the Add Location dialog and the
+// radius mini-button dropdown in the Search Title bar.
+// ---------------------------------------------------------------------------
+
+const RADIUS_OPTIONS = ["Exact location only", "10km", "20km", "50km", "100km"] as const;
+type RadiusOption = (typeof RADIUS_OPTIONS)[number];
+
+function radiusKmToOption(km: number): RadiusOption {
+  if (km === 0) return "Exact location only";
+  const candidate = `${km}km` as RadiusOption;
+  return (RADIUS_OPTIONS as readonly string[]).includes(candidate) ? candidate : "10km";
+}
+
+function radiusOptionToKm(opt: RadiusOption): number {
+  if (opt === "Exact location only") return 0;
+  return parseInt(opt) || 10;
+}
+
+// Label shown on the mini-button trigger: numeric options get "Within" prepended.
+function radiusButtonLabel(opt: RadiusOption): string {
+  return opt === "Exact location only" ? opt : `Within ${opt}`;
+}
+
 function slugifyLabel(value: string): string {
   return value
     .toLowerCase()
@@ -1131,7 +1154,7 @@ function AddLocationDialog({
   // Derived from the suggestion on selection, or falls back to cityInput.
   const [city, setCity] = useState("");
 
-  const [radius, setRadius] = useState("10");
+  const [radiusOption, setRadiusOption] = useState<RadiusOption>("10km");
 
   // countryIndeed — the country_indeed value for hybrid searches.
   // Auto-filled when a suggestion is selected; manually overridable via TraySelect.
@@ -1159,7 +1182,7 @@ function AddLocationDialog({
     if (locationType === "hybrid") {
       onAdd(locationType, {
         city: (city || cityInput).trim(),
-        radiusKm: Number(radius) || 10,
+        radiusKm: radiusOptionToKm(radiusOption),
         country: countryIndeed,
       });
     } else {
@@ -1214,11 +1237,15 @@ function AddLocationDialog({
                 </>
               }
             >
-              <TrayInput
+              <TraySelect
                 id="dialog-radius"
-                placeholder="10"
-                value={radius}
-                onChange={setRadius}
+                placeholder="Select radius"
+                options={[...RADIUS_OPTIONS]}
+                type="single"
+                defaultValue={radiusOption}
+                onChange={(selected) => {
+                  if (selected[0]) setRadiusOption(selected[0] as RadiusOption);
+                }}
               />
             </TrayFormItem>
           </div>
@@ -1245,19 +1272,113 @@ function AddLocationDialog({
             id="button-dialog-add-location"
             type="button"
             onClick={handleAdd}
-            className="h-9 rounded-full bg-secondary px-4 text-sm font-light text-secondary-foreground shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:opacity-90"
+            className="h-9 rounded-full bg-secondary px-4 text-sm font-bold text-secondary-foreground shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:opacity-90"
           >
             Add Location
           </button>
           <button
             type="button"
             onClick={onClose}
-            className="h-9 rounded-full bg-accent px-4 text-sm font-light text-accent-foreground shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:opacity-90"
+            className="h-9 rounded-full bg-accent px-4 text-sm font-bold text-accent-foreground shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:opacity-90"
           >
             Cancel
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mini Button components (Figma: "Mini Button" node 270-5164)
+// Rest: control-background fill + muted border.
+// Hover: control-active fill + shadow.
+// Pressed: neutral-mid (#e2dbd4) fill.
+// ---------------------------------------------------------------------------
+
+// Simple action mini-button (no dropdown).
+function MiniButton({
+  id,
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  id?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      id={id}
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-2 rounded-full border border-muted bg-control-background px-2 py-1 text-xs font-normal text-muted-foreground hover:bg-control-active hover:shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] active:bg-[#e2dbd4] transition-colors"
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {label}
+    </button>
+  );
+}
+
+// Mini-button with a dropdown list — used for the radius picker.
+function MiniButtonDropdown({
+  id,
+  icon: Icon,
+  label,
+  options,
+  onSelect,
+}: {
+  id?: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  options: readonly string[];
+  onSelect: (option: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onMouseDown(e: MouseEvent) {
+      if (!containerRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onMouseDown);
+    return () => document.removeEventListener("mousedown", onMouseDown);
+  }, []);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        id={id}
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 rounded-full border border-muted bg-control-background px-2 py-1 text-xs font-normal text-muted-foreground hover:bg-control-active hover:shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] active:bg-[#e2dbd4] transition-colors"
+      >
+        <Icon className="h-4 w-4 shrink-0" />
+        <span className="flex items-center gap-1">
+          {label}
+          <ChevronDown className="h-4 w-4 shrink-0" />
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 min-w-max rounded-2xl border border-black/8 bg-control-surface p-1 shadow-[0px_2px_4px_-2px_rgba(0,0,0,0.1),0px_4px_6px_-1px_rgba(0,0,0,0.1)]">
+          {options.map((opt) => (
+            <button
+              key={opt}
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                onSelect(opt);
+                setOpen(false);
+              }}
+              className="flex w-full items-center rounded-full px-3 py-1.5 text-left text-sm font-light text-primary hover:bg-black/5"
+            >
+              {opt}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1671,6 +1792,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshingAll, setRefreshingAll] = useState(false);
+  const [refreshingSlug, setRefreshingSlug] = useState<string | null>(null);
   const [selectedJob, setSelectedJob] = useState<JobSelection | null>(null);
   const [selectedJobDescription, setSelectedJobDescription] = useState("");
   const [isDescriptionLoading, setIsDescriptionLoading] = useState(false);
@@ -1698,6 +1820,11 @@ export default function Home() {
   // Add Location dialog visibility.
   const [showAddLocationDialog, setShowAddLocationDialog] = useState(false);
 
+  // Slugs of tabs where the user has temporarily disabled client-side filters.
+  // Stored as a Set so lookups are O(1). Always create a new Set when mutating
+  // so React detects the state change.
+  const [filtersDisabledTabs, setFiltersDisabledTabs] = useState<Set<string>>(new Set());
+
   // Which settings tray is currently open, or null if closed.
   //   "search" — keyword search settings (triggered by the keyword input)
   const [activeTray, setActiveTray] = useState<"search" | null>(null);
@@ -1720,7 +1847,14 @@ export default function Home() {
       // is closed explicitly inside handleSearch instead.
       const searchButton = document.getElementById("button-search");
       const outsideSearchButton = !searchButton?.contains(target);
-      if (outsideTray && outsideKeyword && outsideTabBar && outsideSearchButton && !showAddLocationDialog) {
+      // Exclude the settings and add-location buttons for the same reason.
+      const settingsButton = document.getElementById("button-settings");
+      const outsideSettingsButton = !settingsButton?.contains(target);
+      // Exclude add-location: mousedown fires before the dialog opens, so without
+      // this exclusion the tray would close before showAddLocationDialog becomes true.
+      const addLocationButton = document.getElementById("button-add-location");
+      const outsideAddLocation = !addLocationButton?.contains(target);
+      if (outsideTray && outsideKeyword && outsideTabBar && outsideSearchButton && outsideSettingsButton && outsideAddLocation && !showAddLocationDialog) {
         setActiveTray(null);
       }
     }
@@ -1801,11 +1935,6 @@ export default function Home() {
     void loadData();
   }, [loadSearches]);
 
-  const activeSearch = useMemo(
-    () => searches.find((item) => item.slug === activeTab) ?? null,
-    [activeTab, searches]
-  );
-
   const resolvedActiveTab = useMemo(() => {
     // Draft tabs take priority — if the active tab is a draft, return it as-is.
     if (draftTabs.some((tab) => tab.id === activeTab)) {
@@ -1847,10 +1976,13 @@ export default function Home() {
     return new Map(
       searches.map((search) => [
         search.slug,
-        applyClientFilters(search.results, parsedIncludes, parsedExcludes, parsedBlacklist),
+        // When the user has disabled filters for this tab, show all results unfiltered.
+        filtersDisabledTabs.has(search.slug)
+          ? search.results
+          : applyClientFilters(search.results, parsedIncludes, parsedExcludes, parsedBlacklist),
       ])
     );
-  }, [searches, parsedIncludes, parsedExcludes, parsedBlacklist]);
+  }, [searches, parsedIncludes, parsedExcludes, parsedBlacklist, filtersDisabledTabs]);
 
   const refreshTooltip = useMemo(() => {
     const rawTotal = searches.reduce(
@@ -2198,6 +2330,89 @@ export default function Home() {
     })();
   }
 
+  // Removes a search tab and its config location. Works for both real searches
+  // and draft tabs. Switches the active tab to the next available one.
+  function handleDeleteSearch(slug: string) {
+    if (!savedConfig) return;
+
+    const deletedLocation = savedConfig.locations.find(
+      (loc) => slugifyLabel(loc.label) === slug
+    );
+    if (!deletedLocation) return;
+
+    const updatedLocations = savedConfig.locations.filter(
+      (loc) => loc.id !== deletedLocation.id
+    );
+    const updatedSearches = searches.filter((s) => s.slug !== slug);
+    const updatedDrafts = draftTabs.filter((d) => d.id !== slug);
+    setSearches(updatedSearches);
+    setDraftTabs(updatedDrafts);
+    setFiltersDisabledTabs((prev) => {
+      const next = new Set(prev);
+      next.delete(slug);
+      return next;
+    });
+
+    if (updatedSearches.length > 0) {
+      setActiveTab(updatedSearches[0].slug);
+    } else if (updatedDrafts.length > 0) {
+      setActiveTab(updatedDrafts[0].id);
+    } else {
+      setActiveTab("");
+    }
+
+    void (async () => {
+      try {
+        const res = await fetch("/api/user-config", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...buildCurrentConfig(), locations: updatedLocations }),
+        });
+        if (res.ok) setSavedConfig((await res.json()) as UserConfig);
+      } catch (err) {
+        setError(String(err));
+      }
+    })();
+  }
+
+  // Updates the search radius for a hybrid location, persists to config, then
+  // immediately re-runs only that location's search for the full daysOld window.
+  function handleChangeRadius(slug: string, newRadiusKm: number) {
+    if (!savedConfig) return;
+
+    const updatedLocations = savedConfig.locations.map((loc) =>
+      loc.type === "hybrid" && slugifyLabel(loc.label) === slug
+        ? { ...loc, radiusKm: newRadiusKm }
+        : loc
+    );
+
+    void (async () => {
+      try {
+        setRefreshingSlug(slug);
+        setError(null);
+
+        const res = await fetch("/api/user-config", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...buildCurrentConfig(), locations: updatedLocations }),
+        });
+        if (res.ok) setSavedConfig((await res.json()) as UserConfig);
+
+        const refreshRes = await fetch(`/api/searches/${slug}/refresh?fullPeriod=true`, { method: "POST" });
+        const payload = (await refreshRes.json()) as { search?: SearchData; error?: string };
+        if (!refreshRes.ok) throw new Error(payload.error ?? "Failed to refresh search");
+
+        setSearches((current) =>
+          current.map((s) => (s.slug === slug ? (payload.search as SearchData) : s))
+        );
+      } catch (err) {
+        setError(String(err));
+      } finally {
+        setRefreshingSlug(null);
+      }
+    })();
+  }
+
   const updateJobStatus = async (statusKey: string, status: JobStatus) => {
     try {
       const response = await fetch("/api/job-statuses", {
@@ -2304,7 +2519,6 @@ export default function Home() {
                 ref={keywordInputRef}
                 type="text"
                 defaultValue={formatListForDisplay(savedKeywords)}
-                onFocus={() => setActiveTray("search")}
                 onInput={(e) => {
                   // Only update state when crossing the empty/non-empty boundary,
                   // not on every keystroke — React bails out automatically for
@@ -2314,50 +2528,89 @@ export default function Home() {
                 placeholder="Enter job keywords"
                 className="h-9 w-[240px] shrink-0 rounded-full border border-black/8 bg-control-strong px-4 text-sm text-control-foreground placeholder:text-muted-foreground hover:bg-control-solid focus:bg-control-solid focus:border-black/32 focus:outline-none focus:ring-0"
               />
+
+              {/* Settings button — only shown when tabs exist; clicking toggles the search settings tray */}
+              {(searches.length > 0 || draftTabs.length > 0) && (
+                <button
+                  id="button-settings"
+                  type="button"
+                  onClick={() => setActiveTray(activeTray === "search" ? null : "search")}
+                  title="Search settings"
+                  className="flex h-9 shrink-0 items-center justify-center rounded-full bg-control-background px-2 text-white hover:bg-control-active transition-colors"
+                >
+                  <Settings2 className="h-5 w-5 shrink-0" />
+                </button>
+              )}
+
               <span id="header-jobs-in-label" className="shrink-0 text-lg leading-none">jobs in</span>
 
-              <div id="dashboard-tab-bar" className="min-w-0 flex-1 overflow-x-auto rounded-full overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                <TabsList id="dashboard-tab-list" className="h-9 w-fit min-w-max items-center justify-start gap-[4px] rounded-full bg-control-strong p-4px shadow-[0px_1px_1.5px_rgba(0,0,0,0.1)]">
-                  {searches.map((search) => (
-                    <TabsTrigger
-                      id={`tab-trigger-${search.slug}`}
-                      key={search.slug}
-                      value={search.slug}
-                      className="!flex-none h-[29px] rounded-full border border-[var(--color-semantic-border)] px-4 py-1 text-sm font-light tracking-[-0.168px] text-[var(--color-semantic-control-foreground)] bg-transparent hover:bg-[var(--color-semantic-control-active)] hover:text-[var(--color-semantic-control-foreground)] data-active:bg-[var(--color-semantic-primary)] data-active:text-[var(--color-semantic-primary-foreground)] data-active:border-[var(--color-semantic-border)] data-active:shadow-[0px_1px_1.5px_rgba(0,0,0,0.1)]"
-                    >
-                      {search.title} ({filteredResultsMap.get(search.slug)?.length ?? search.resultCount})
-                    </TabsTrigger>
-                  ))}
+              {/* Tab bar — only rendered when searches or draft tabs exist */}
+              {(searches.length > 0 || draftTabs.length > 0) && (
+                <div id="dashboard-tab-bar" className="min-w-0 overflow-x-auto rounded-full overflow-y-hidden [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  <TabsList id="dashboard-tab-list" className="!h-9 w-fit min-w-max items-center justify-start gap-[4px] rounded-full bg-control-strong p-[2px] shadow-[0px_1px_1.5px_rgba(0,0,0,0.1)]">
+                    {searches.map((search) => {
+                      const resultCount = filteredResultsMap.get(search.slug)?.length ?? search.resultCount;
+                      const isRefreshing = refreshingAll || refreshingSlug === search.slug;
+                      return (
+                        <TabsTrigger
+                          id={`tab-trigger-${search.slug}`}
+                          key={search.slug}
+                          value={search.slug}
+                          className="tab-item-hover !flex-none h-8 overflow-hidden rounded-full pl-4 pr-1 py-1 text-sm font-light tracking-[-0.168px] text-control-foreground hover:text-control-foreground active:bg-control-active data-active:bg-control-foreground data-active:text-accent-foreground data-active:hover:text-accent-foreground"
+                        >
+                          <span className="flex items-center gap-2">
+                            <span>{search.title}</span>
+                            {/* Result count pill — bg/text driven by .tab-item-pill CSS rules in globals.css */}
+                            <span className={`tab-item-pill flex items-center justify-center overflow-hidden rounded-full py-1 ${isRefreshing ? "px-1" : "px-2"}`}>
+                              {isRefreshing
+                                ? <Loader2 className="h-4 w-4 animate-spin" />
+                                : <span className="text-xs font-normal leading-none">{resultCount}</span>
+                              }
+                            </span>
+                          </span>
+                        </TabsTrigger>
+                      );
+                    })}
 
-                  {/* Draft tabs — created by the Add Location dialog */}
-                  {draftTabs.map((draft) => (
-                    <TabsTrigger
-                      id={`tab-trigger-${draft.id}`}
-                      key={draft.id}
-                      value={draft.id}
-                      className="!flex-none h-[29px] rounded-full border border-[var(--color-semantic-border)] px-4 py-1 text-sm font-light tracking-[-0.168px] text-[var(--color-semantic-control-foreground)] bg-transparent hover:bg-[var(--color-semantic-control-active)] hover:text-[var(--color-semantic-control-foreground)] data-active:bg-[var(--color-semantic-primary)] data-active:text-[var(--color-semantic-primary-foreground)] data-active:border-[var(--color-semantic-border)] data-active:shadow-[0px_1px_1.5px_rgba(0,0,0,0.1)]"
-                    >
-                      {draft.title}
-                    </TabsTrigger>
-                  ))}
+                    {/* Draft tabs — created by the Add Location dialog, always show 0 */}
+                    {draftTabs.map((draft) => (
+                      <TabsTrigger
+                        id={`tab-trigger-${draft.id}`}
+                        key={draft.id}
+                        value={draft.id}
+                        className="tab-item-hover !flex-none h-8 overflow-hidden rounded-full pl-4 pr-1 py-1 text-sm font-light tracking-[-0.168px] text-control-foreground hover:text-control-foreground active:bg-control-active data-active:bg-control-foreground data-active:text-accent-foreground data-active:hover:text-accent-foreground"
+                      >
+                        <span className="flex items-center gap-2">
+                          <span>{draft.title}</span>
+                          <span className={`tab-item-pill flex items-center justify-center overflow-hidden rounded-full py-1 ${refreshingAll ? "px-1" : "px-2"}`}>
+                            {refreshingAll
+                              ? <Loader2 className="h-4 w-4 animate-spin" />
+                              : <span className="text-xs font-normal leading-none">0</span>
+                            }
+                          </span>
+                        </span>
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                </div>
+              )}
 
-                  <button
-                    id="button-add-tab"
-                    type="button"
-                    onClick={() => setShowAddLocationDialog(true)}
-                    className="inline-flex h-[29px] shrink-0 items-center justify-center gap-1 rounded-full px-4 py-0 text-xs font-normal border-none text-[var(--color-semantic-control-foreground)] bg-transparent border border-[var(--color-semantic-border)] hover:bg-[var(--color-semantic-control-active)] hover:text-[var(--color-semantic-control-foreground)]"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>Add Location</span>
-                  </button>
-                </TabsList>
-              </div>
+              {/* Add Location button — shows text when no tabs exist, icon only when tabs are present */}
+              <button
+                id="button-add-location"
+                type="button"
+                onClick={() => setShowAddLocationDialog(true)}
+                className={`flex h-9 shrink-0 items-center gap-2 rounded-full bg-control-background text-sm font-semibold text-white hover:bg-control-active transition-colors ${searches.length > 0 || draftTabs.length > 0 ? "px-2" : "px-3"}`}
+              >
+                <Plus className="h-5 w-5 shrink-0" />
+                {searches.length === 0 && draftTabs.length === 0 && <span>Add Location</span>}
+              </button>
 
-              <Button
+              <button
                 id="button-search"
+                type="button"
                 onClick={() => void handleSearch()}
-                disabled={refreshingAll || !keywordHasValue || (searches.length === 0 && draftTabs.length === 0 && (savedConfig?.locations ?? []).length === 0)}
-                size="sm"
+                disabled={refreshingAll || !!refreshingSlug || !keywordHasValue || (searches.length === 0 && draftTabs.length === 0 && (savedConfig?.locations ?? []).length === 0)}
                 title={
                   !keywordHasValue
                     ? "Enter a keyword to search"
@@ -2365,11 +2618,11 @@ export default function Home() {
                     ? "Add a location to search"
                     : refreshTooltip
                 }
-                className="relative h-9 w-9 shrink-0 rounded-full bg-white p-0 text-transparent shadow-[0px_1px_2px_0px_rgba(0,0,0,0.1)] hover:bg-white/90"
+                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-control-background px-3 text-sm font-semibold text-white hover:bg-control-active disabled:opacity-50 transition-colors"
               >
-                <Search className="absolute left-1/2 top-1/2 h-5 w-5 -translate-x-1/2 -translate-y-1/2 text-primary" />
-                <span className="sr-only">Search</span>
-              </Button>
+                {refreshingAll ? <Loader2 className="h-5 w-5 shrink-0 animate-spin" /> : <Search className="h-5 w-5 shrink-0" />}
+                <span>Search</span>
+              </button>
             </div>
           </div>
         </section>
@@ -2377,7 +2630,7 @@ export default function Home() {
         {/* Settings Tray — shown below the header when the keyword input is focused */}
         {activeTray === "search" && (
           <section id="settings-tray" ref={settingsTrayRef} className="relative bg-control-surface shrink-0">
-            <SettingsTrayPointer anchorId="input-keyword" />
+            <SettingsTrayPointer anchorId="button-settings" />
             <div id="settings-tray-inner" className="mx-auto max-w-[1280px] px-4 md:px-8 py-6">
               <SearchSettingsContent
                 onClose={() => setActiveTray(null)}
@@ -2398,15 +2651,88 @@ export default function Home() {
 
         <section id="dashboard-content" className="flex min-h-0 flex-1 overflow-hidden bg-background">
           <div id="dashboard-content-inner" className="mx-auto flex min-h-0 w-full max-w-[1280px] flex-1 flex-col overflow-hidden">
-            {searches.map((search) => (
+            {searches.map((search) => {
+              // Resolve the saved config location for this tab (used by Search Title).
+              const matchedLoc = savedConfig?.locations?.find(
+                (loc) => slugifyLabel(loc.label) === search.slug
+              );
+              const isHybridLoc = matchedLoc?.type === "hybrid";
+              const filtersOff = filtersDisabledTabs.has(search.slug);
+              const filteredCount = filteredResultsMap.get(search.slug)?.length ?? search.resultCount;
+              const hiddenCount = search.results.length - filteredCount;
+              const totalCount = search.results.length;
+
+              // Title: "City, Country" for hybrid, "Country" for remote.
+              const titleText = isHybridLoc && matchedLoc.type === "hybrid"
+                ? `${matchedLoc.city}, ${matchedLoc.country}`
+                : matchedLoc?.type === "remote"
+                ? matchedLoc.country
+                : search.title;
+
+              // Metadata line below the title.
+              const metadataText = filtersOff
+                ? `${totalCount} jobs`
+                : hiddenCount > 0
+                ? `${filteredCount} jobs, ${hiddenCount} hidden by filters`
+                : `${filteredCount} jobs`;
+
+              // Current radius option for the dropdown trigger label.
+              const currentRadiusOpt =
+                matchedLoc?.type === "hybrid" ? radiusKmToOption(matchedLoc.radiusKm) : null;
+
+              return (
               <TabsContent
                 id={`search-panel-${search.slug}`}
                 key={search.slug}
                 value={search.slug}
                 className="flex h-full min-h-0 flex-1 flex-col overflow-hidden text-card-foreground"
               >
+                {/* Search Title — location name, metadata, and action controls */}
+                <div id={`search-title-${search.slug}`} className="shrink-0 px-6 pt-4 flex flex-col gap-2">
+                  <h2 className="text-lg font-semibold leading-none text-primary">{titleText}</h2>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      {/* Radius picker — hybrid searches only */}
+                      {isHybridLoc && currentRadiusOpt && (
+                        <MiniButtonDropdown
+                          id={`button-radius-${search.slug}`}
+                          icon={Search}
+                          label={radiusButtonLabel(currentRadiusOpt)}
+                          options={RADIUS_OPTIONS}
+                          onSelect={(opt) =>
+                            handleChangeRadius(search.slug, radiusOptionToKm(opt as RadiusOption))
+                          }
+                        />
+                      )}
+                      {/* Disable / Enable Filters toggle */}
+                      <MiniButton
+                        id={`button-filters-${search.slug}`}
+                        icon={filtersOff ? Eye : EyeOff}
+                        label={filtersOff ? "Enable Filters" : "Disable Filters"}
+                        onClick={() =>
+                          setFiltersDisabledTabs((prev) => {
+                            const next = new Set(prev);
+                            filtersOff ? next.delete(search.slug) : next.add(search.slug);
+                            return next;
+                          })
+                        }
+                      />
+                      {/* Delete this location */}
+                      <MiniButton
+                        id={`button-delete-search-${search.slug}`}
+                        icon={Trash2}
+                        label="Delete Location"
+                        onClick={() => handleDeleteSearch(search.slug)}
+                      />
+                    </div>
+                    <p className="text-sm font-light leading-5 tracking-[-0.168px] text-muted-foreground">
+                      {metadataText}
+                    </p>
+                  </div>
+                </div>
+
                 {/* Desktop table view – hidden on mobile */}
-                <div id={`search-results-wrap-${search.slug}`} className="hidden md:flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pt-4">
+                <div id={`search-results-wrap-${search.slug}`} className="hidden md:flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pt-2">
                   <div className="min-w-[1100px]">
                     <Table id={`search-results-table-${search.slug}`} className="table-fixed">
                       <TableHeader id={`search-results-header-${search.slug}`}>
@@ -2521,12 +2847,6 @@ export default function Home() {
                         </TableBody>
                       </Table>
 
-                      <p
-                        id={`search-results-filter-summary-${search.slug}`}
-                        className="px-2 pt-3 pb-6 text-sm font-light italic text-muted-foreground"
-                      >
-                        {Math.max(0, search.results.length - (filteredResultsMap.get(search.slug)?.length ?? search.results.length))} jobs hidden by filters
-                      </p>
                     </div>
                   </ScrollArea>
                 </div>
@@ -2543,9 +2863,70 @@ export default function Home() {
 
                 {error ? <p id={`search-error-${search.slug}`} className="px-4 md:px-0 mt-3 text-sm text-destructive">{error}</p> : null}
               </TabsContent>
-            ))}
+              );
+            })}
 
-            {!activeSearch ? <EmptySearchState /> : null}
+            {/* Draft tab panels — location added but search not yet run */}
+            {draftTabs.map((draft) => {
+              const matchedLoc = savedConfig?.locations?.find(
+                (loc) => slugifyLabel(loc.label) === draft.id
+              );
+              const isHybridLoc = matchedLoc?.type === "hybrid";
+              const currentRadiusOpt =
+                matchedLoc?.type === "hybrid" ? radiusKmToOption(matchedLoc.radiusKm) : null;
+              const titleText = isHybridLoc && matchedLoc.type === "hybrid"
+                ? `${matchedLoc.city}, ${matchedLoc.country}`
+                : matchedLoc?.type === "remote"
+                ? matchedLoc.country
+                : draft.title;
+
+              return (
+                <TabsContent
+                  id={`search-panel-${draft.id}`}
+                  key={draft.id}
+                  value={draft.id}
+                  className="flex h-full min-h-0 flex-1 flex-col overflow-hidden text-card-foreground"
+                >
+                  <div id={`search-title-${draft.id}`} className="shrink-0 px-6 pt-4 flex flex-col gap-2">
+                    <h2 className="text-lg font-semibold leading-none text-primary">{titleText}</h2>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        {isHybridLoc && currentRadiusOpt && (
+                          <MiniButtonDropdown
+                            id={`button-radius-${draft.id}`}
+                            icon={Search}
+                            label={radiusButtonLabel(currentRadiusOpt)}
+                            options={RADIUS_OPTIONS}
+                            onSelect={(opt) =>
+                              handleChangeRadius(draft.id, radiusOptionToKm(opt as RadiusOption))
+                            }
+                          />
+                        )}
+                        <MiniButton
+                          id={`button-filters-${draft.id}`}
+                          icon={EyeOff}
+                          label="Disable Filters"
+                          onClick={() => {}}
+                        />
+                        <MiniButton
+                          id={`button-delete-search-${draft.id}`}
+                          icon={Trash2}
+                          label="Delete Location"
+                          onClick={() => handleDeleteSearch(draft.id)}
+                        />
+                      </div>
+                      <p className="text-sm font-light leading-5 tracking-[-0.168px] text-muted-foreground">
+                        No jobs to display
+                      </p>
+                    </div>
+                  </div>
+                  <EmptySearchState />
+                </TabsContent>
+              );
+            })}
+
+            {/* Empty state shown only when there are no tabs at all */}
+            {searches.length === 0 && draftTabs.length === 0 ? <EmptySearchState /> : null}
           </div>
         </section>
 

@@ -142,7 +142,7 @@ test.describe("Search execution", () => {
     await page.locator("#input-keyword").fill("UX Designer");
 
     // Add a location — a draft tab with id="tab-trigger-edinburgh" should appear.
-    await page.locator("#button-add-tab").click();
+    await page.locator("#button-add-location").click();
     await page.locator("#dialog-city").fill("Edinburgh");
     await page.locator("#button-dialog-add-location").click();
     await expect(page.locator("#tab-trigger-edinburgh")).toBeVisible();
@@ -204,8 +204,9 @@ test.describe("Search execution", () => {
     });
     await goto(page);
 
-    // Tab trigger contains the title and count in parentheses.
-    await expect(page.locator("#tab-trigger-edinburgh")).toContainText("Edinburgh (1)");
+    // Tab trigger contains the title and the count pill separately.
+    await expect(page.locator("#tab-trigger-edinburgh")).toContainText("Edinburgh");
+    await expect(page.locator("#tab-trigger-edinburgh")).toContainText("1");
   });
 
   test("keyword input is populated from saved config on load", async ({ page }) => {
