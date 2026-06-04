@@ -25,6 +25,15 @@ import { INDUSTRY_LABELS } from "@/lib/industry-labels";
 import { INDEED_COUNTRIES, POPULAR_CITIES } from "@/lib/location-constants";
 import type { LocationSuggestion } from "@/lib/location-constants";
 
+function useDebounce<T>(value: T, delay: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(id);
+  }, [value, delay]);
+  return debounced;
+}
+
 type SearchData = {
   slug: string;
   title: string;
@@ -1963,11 +1972,16 @@ export default function Home() {
     return newest > 0 ? new Date(newest).toISOString() : null;
   }, [searches]);
 
-  // Parse the tray filter inputs into arrays once, so the filteredResultsMap memo
+  // Debounce filter inputs so the table only re-filters after the user pauses typing.
+  const debouncedTitleIncludes = useDebounce(trayTitleIncludes, 300);
+  const debouncedTitleExcludes = useDebounce(trayTitleExcludes, 300);
+  const debouncedBlacklist = useDebounce(trayBlacklist, 300);
+
+  // Parse the debounced tray filter inputs into arrays once, so the filteredResultsMap memo
   // only re-runs when the parsed content actually changes (not on every char typed).
-  const parsedIncludes = useMemo(() => parseListInput(trayTitleIncludes), [trayTitleIncludes]);
-  const parsedExcludes = useMemo(() => parseListInput(trayTitleExcludes), [trayTitleExcludes]);
-  const parsedBlacklist = useMemo(() => parseListInput(trayBlacklist), [trayBlacklist]);
+  const parsedIncludes = useMemo(() => parseListInput(debouncedTitleIncludes), [debouncedTitleIncludes]);
+  const parsedExcludes = useMemo(() => parseListInput(debouncedTitleExcludes), [debouncedTitleExcludes]);
+  const parsedBlacklist = useMemo(() => parseListInput(debouncedBlacklist), [debouncedBlacklist]);
 
   // Client-side filtered results keyed by search slug.
   // Re-computes instantly whenever the filter state or the raw results change —
@@ -2511,7 +2525,7 @@ export default function Home() {
               </button>
             </div>
 
-            <div id="header-input-keyword-row" className="flex w-full items-center gap-3 overflow-x-auto whitespace-nowrap text-xl">
+            <div id="header-input-keyword-row" className="flex w-full items-center gap-3 overflow-x-auto overflow-y-hidden whitespace-nowrap text-xl [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <span id="header-find-label" className="shrink-0 text-lg leading-none">Find</span>
               <label htmlFor="input-keyword" className="sr-only">Search keyword</label>
               <input
