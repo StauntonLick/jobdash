@@ -2550,7 +2550,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setActiveTray(activeTray === "search" ? null : "search")}
                   title="Search settings"
-                  className="flex h-9 shrink-0 items-center justify-center rounded-full bg-control-background px-2 text-white hover:bg-control-active transition-colors"
+                  className="flex h-9 shrink-0 items-center justify-center rounded-full bg-control-background px-2 text-white hover:bg-control-accent-hover transition-colors"
                 >
                   <Settings2 className="h-5 w-5 shrink-0" />
                 </button>
@@ -2570,7 +2570,7 @@ export default function Home() {
                           id={`tab-trigger-${search.slug}`}
                           key={search.slug}
                           value={search.slug}
-                          className="tab-item-hover !flex-none h-8 overflow-hidden rounded-full pl-4 pr-1 py-1 text-sm font-light tracking-[-0.168px] text-control-foreground hover:text-control-foreground active:bg-control-active data-active:bg-control-foreground data-active:text-accent-foreground data-active:hover:text-accent-foreground"
+                          className="tab-item-hover !flex-none h-8 overflow-hidden rounded-full pl-4 pr-1 py-1 text-sm font-light tracking-[-0.168px] text-control-foreground hover:text-control-foreground active:bg-control-strong data-active:bg-control-foreground data-active:text-accent-foreground data-active:hover:text-accent-foreground"
                         >
                           <span className="flex items-center gap-2">
                             <span>{search.title}</span>
@@ -2592,7 +2592,7 @@ export default function Home() {
                         id={`tab-trigger-${draft.id}`}
                         key={draft.id}
                         value={draft.id}
-                        className="tab-item-hover !flex-none h-8 overflow-hidden rounded-full pl-4 pr-1 py-1 text-sm font-light tracking-[-0.168px] text-control-foreground hover:text-control-foreground active:bg-control-active data-active:bg-control-foreground data-active:text-accent-foreground data-active:hover:text-accent-foreground"
+                        className="tab-item-hover !flex-none h-8 overflow-hidden rounded-full pl-4 pr-1 py-1 text-sm font-light tracking-[-0.168px] text-control-foreground hover:text-control-foreground active:bg-control-strong data-active:bg-control-foreground data-active:text-accent-foreground data-active:hover:text-accent-foreground"
                       >
                         <span className="flex items-center gap-2">
                           <span>{draft.title}</span>
@@ -2614,7 +2614,7 @@ export default function Home() {
                 id="button-add-location"
                 type="button"
                 onClick={() => setShowAddLocationDialog(true)}
-                className={`flex h-9 shrink-0 items-center gap-2 rounded-full bg-control-background text-sm font-semibold text-white hover:bg-control-active transition-colors ${searches.length > 0 || draftTabs.length > 0 ? "px-2" : "px-3"}`}
+                className={`flex h-9 shrink-0 items-center gap-2 rounded-full bg-control-background text-sm font-semibold text-white hover:bg-control-accent-hover transition-colors ${searches.length > 0 || draftTabs.length > 0 ? "px-2" : "px-3"}`}
               >
                 <Plus className="h-5 w-5 shrink-0" />
                 {searches.length === 0 && draftTabs.length === 0 && <span>Add Location</span>}
@@ -2632,7 +2632,7 @@ export default function Home() {
                     ? "Add a location to search"
                     : refreshTooltip
                 }
-                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-control-background px-3 text-sm font-semibold text-white hover:bg-control-active disabled:opacity-50 transition-colors"
+                className="flex h-9 shrink-0 items-center gap-2 rounded-full bg-control-background px-3 text-sm font-semibold text-white hover:bg-control-accent-hover disabled:opacity-50 transition-colors"
               >
                 {refreshingAll ? <Loader2 className="h-5 w-5 shrink-0 animate-spin" /> : <Search className="h-5 w-5 shrink-0" />}
                 <span>Search</span>

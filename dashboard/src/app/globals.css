@@ -39,6 +39,7 @@
   --color-control-background: var(--color-semantic-control-background);
   --color-control-active: var(--color-semantic-control-active);
   --color-control-hover: var(--color-semantic-control-hover);
+  --color-control-accent-hover: var(--color-semantic-control-accent-hover);
   --color-control-surface: var(--color-semantic-control-surface);
   --color-control-strong: var(--color-semantic-control-strong);
   --color-control-solid: var(--color-semantic-control-solid);
@@ -97,7 +98,8 @@
   --color-semantic-control-surface: var(--color-brand-quaternary); /* #e2dbd4 */
   --color-semantic-control-strong: rgba(255, 255, 255, 0.84);
   --color-semantic-control-solid: #ffffff;
-  --color-semantic-control-hover: var(--color-semantic-muted);
+  --color-semantic-control-hover: rgba(0, 0, 0, 0.08);
+  --color-semantic-control-accent-hover: rgba(255, 255, 255, 0.24);
   --color-semantic-control-border: #d2ccc8;
 
   --color-semantic-destructive: #d74343;
@@ -169,26 +171,25 @@
 }
 
 /* Tab item interaction states — defined outside @layer so they win over Tailwind utilities */
+.tab-item-hover {
+  transition: background-color 300ms cubic-bezier(0.4, 0, 0.2, 1),
+              background-image 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
 .tab-item-hover:not([data-active]):hover {
   background-color: var(--color-semantic-control-hover);
 }
 .tab-item-hover[data-active]:hover {
-  background-image: linear-gradient(var(--color-semantic-muted-foreground), var(--color-semantic-muted-foreground));
+  background-image: linear-gradient(rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.24));
 }
 
-/* Pill inside tab — inset box-shadow used for hover border so it never affects layout */
+/* Pill inside tab */
 .tab-item-pill {
   background-color: var(--color-semantic-muted);
   color: var(--color-semantic-muted-foreground);
-}
-.tab-item-hover:not([data-active]):hover .tab-item-pill {
-  box-shadow: inset 0 0 0 1px var(--color-semantic-border);
+  transition: background-color 300ms cubic-bezier(0.4, 0, 0.2, 1),
+              color 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 .tab-item-hover[data-active] .tab-item-pill {
   background-color: var(--color-semantic-muted-foreground);
   color: var(--color-semantic-primary-foreground);
-}
-.tab-item-hover[data-active]:hover .tab-item-pill {
-  box-shadow: inset 0 0 0 1px var(--color-semantic-border);
-  color: var(--color-semantic-muted);
 }
