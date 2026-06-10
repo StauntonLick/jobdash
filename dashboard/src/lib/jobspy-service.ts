@@ -1472,7 +1472,10 @@ export async function loadOrRunSearch(
     const previousResults = searchTermChanged ? [] : (cached?.results ?? []);
 
     const mergedResults = mergeResults(previousResults, results);
-    const { active, archived } = splitActiveAndArchivedResults(mergedResults);
+    const cacheReadyResults = shouldEnforceRemoteOnly(definition.criteria)
+      ? mergedResults.filter((row) => isRemoteResult(row) || isLikelyLinkedInRemote(row))
+      : mergedResults;
+    const { active, archived } = splitActiveAndArchivedResults(cacheReadyResults);
 
     const payload: SearchResult = {
       slug: definition.slug,
