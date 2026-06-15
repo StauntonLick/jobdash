@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { INDUSTRY_LABELS } from "@/lib/industry-labels";
+import { SENIORITY_LABELS } from "@/lib/seniority-labels";
+import { countAiKeywords, aiLevelFromCount } from "@/lib/ai-keywords";
 import { INDEED_COUNTRIES, POPULAR_CITIES } from "@/lib/location-constants";
 import type { LocationSuggestion } from "@/lib/location-constants";
 
@@ -164,7 +166,7 @@ function slugifyLabel(value: string): string {
 const STATUS_OPTIONS = ["New", "Skipped", "Applied", "Shortlist", "Longlist"] as const;
 type JobStatus = (typeof STATUS_OPTIONS)[number];
 
-const VISIBLE_COLUMNS = ["title", "company", "industry", "salary", "date_posted", "status"] as const;
+const VISIBLE_COLUMNS = ["title", "company", "industry", "ai_level", "seniority", "date_posted", "status"] as const;
 
 type JobLink = {
   site: string;
@@ -232,6 +234,39 @@ function isJobLinkArray(value: unknown): value is JobLink[] {
 
       return "site" in item && "url" in item;
     })
+  );
+}
+
+function getRowPrimaryLink(row: Record<string, unknown>): { site: string; url: string } | null {
+  const jobUrl = row.job_url;
+  const links: JobLink[] = isJobLinkArray(jobUrl)
+    ? jobUrl
+    : jobUrl
+      ? [{ site: "view", url: String(jobUrl) }]
+      : [];
+  return (
+    links.find((l) => {
+      const site = String(l.site ?? "").toLowerCase();
+      return site && site !== "view" && String(l.url ?? "").trim() !== "";
+    }) ?? null
+  );
+}
+
+function buildDescKey(site: string, url: string): string {
+  return `${site.toLowerCase().split(",")[0].trim()}::${url.trim()}`;
+}
+
+function AiLevelCell({ description }: { description: string }) {
+  if (!description) return null;
+  const level = aiLevelFromCount(countAiKeywords(description));
+  return (
+    <span className="flex items-center" style={{ gap: "4px" }}>
+      {([0, 1, 2] as const).map((i) => (
+        <span key={i} style={{ opacity: i < level ? 1 : 0.15 }} aria-hidden="true">
+          🤖
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -358,60 +393,6 @@ function formatDateDdMmYyyyAtHhMm(dateValue: unknown): string {
   const minutes = String(date.getMinutes()).padStart(2, "0");
 
   return `${day}/${month}/${year} at ${hours}:${minutes}`;
-}
-
-function formatCurrencyPrefix(currency: string): string {
-  try {
-    const parts = new Intl.NumberFormat("en-GB", {
-      style: "currency",
-      currency,
-      maximumFractionDigits: 0,
-    }).formatToParts(0);
-
-    return parts.find((part) => part.type === "currency")?.value ?? `${currency} `;
-  } catch {
-    return `${currency} `;
-  }
-}
-
-function formatThousands(amount: number): string {
-  return String(Math.round(amount / 1000));
-}
-
-function hasEstimateMarker(row: Record<string, unknown>): boolean {
-  const explicitFlags = [row.salary_is_estimate, row.is_salary_estimate, row.estimated_salary];
-  if (explicitFlags.some((value) => value === true || String(value).toLowerCase() === "true")) {
-    return true;
-  }
-
-  const source = String(row.salary_source ?? "").toLowerCase();
-  return source.includes("estimate") || source.includes("estimated");
-}
-
-function formatSalary(row: Record<string, unknown>): string {
-  const min = Number(row.min_amount);
-  const max = Number(row.max_amount);
-  const currency = String(row.currency ?? "GBP");
-
-  if (!Number.isFinite(min) && !Number.isFinite(max)) {
-    return "";
-  }
-
-  const low = Number.isFinite(min) && min > 0 ? min : max;
-  const high = Number.isFinite(max) && max > 0 ? max : min;
-
-  if (!Number.isFinite(low) || !Number.isFinite(high) || low <= 0 || high <= 0) {
-    return "";
-  }
-
-  const prefix = formatCurrencyPrefix(currency);
-  const lowText = formatThousands(low);
-  const highText = formatThousands(high);
-
-  const value =
-    low === high ? `${prefix}${lowText}k` : `${prefix}${lowText}-${highText}k`;
-
-  return hasEstimateMarker(row) ? `${value} (estimate)` : value;
 }
 
 function formatSiteName(site: string): string {
@@ -1657,6 +1638,39 @@ function IndustryCell({
 }
 
 
+function SeniorityCell({
+  seniority,
+  onChange,
+}: {
+  seniority: string;
+  onChange: (seniority: string | null) => void;
+}) {
+  const displayText = seniority || "-";
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="group inline-flex items-center gap-1 cursor-pointer hover:opacity-80 transition-opacity"
+      >
+        {displayText}
+        <ChevronDown className="h-4 w-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-max">
+        {SENIORITY_LABELS.map((option) => (
+          <DropdownMenuItem
+            key={option}
+            onClick={() => onChange(option)}
+            disabled={seniority === option}
+          >
+            {option}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+
 // ---------------------------------------------------------------------------
 // Empty Search State
 // ---------------------------------------------------------------------------
@@ -1841,6 +1855,81 @@ export default function Home() {
   // Refs used to detect clicks outside the tray and the keyword input.
   const settingsTrayRef = useRef<HTMLElement>(null);
   const keywordInputRef = useRef<HTMLInputElement>(null);
+
+  // Keep a stable ref to searches so the polling interval never has stale closure issues.
+  const searchesRef = useRef(searches);
+  useEffect(() => { searchesRef.current = searches; });
+
+  const descPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const hasUncached = searches.some((s) =>
+      s.results.some((r) => !r["description"] && getRowPrimaryLink(r))
+    );
+
+    if (!hasUncached) {
+      if (descPollRef.current !== null) {
+        clearInterval(descPollRef.current);
+        descPollRef.current = null;
+      }
+      return;
+    }
+
+    // Already polling — the running interval will pick up new descriptions.
+    if (descPollRef.current !== null) return;
+
+    descPollRef.current = setInterval(() => {
+      const jobs = searchesRef.current.flatMap((s) =>
+        s.results
+          .filter((r) => !r["description"])
+          .map((r) => getRowPrimaryLink(r))
+          .filter((l): l is { site: string; url: string } => l !== null)
+      );
+
+      if (jobs.length === 0) {
+        clearInterval(descPollRef.current!);
+        descPollRef.current = null;
+        return;
+      }
+
+      void (async () => {
+        try {
+          const res = await fetch("/api/job-descriptions/batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ jobs }),
+          });
+          if (!res.ok) return;
+          const data = (await res.json()) as { descriptions: Record<string, string> };
+          if (!Object.keys(data.descriptions).length) return;
+
+          setSearches((prev) =>
+            prev.map((search) => ({
+              ...search,
+              results: search.results.map((row) => {
+                if (row["description"]) return row;
+                const link = getRowPrimaryLink(row);
+                if (!link) return row;
+                const key = buildDescKey(link.site, link.url);
+                const desc = data.descriptions[key];
+                return desc ? { ...row, description: desc } : row;
+              }),
+            }))
+          );
+        } catch {
+          // ignore transient poll errors
+        }
+      })();
+    }, 3000);
+
+    return () => {
+      if (descPollRef.current !== null) {
+        clearInterval(descPollRef.current);
+        descPollRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searches]);
 
   // Close the tray when the user clicks outside the tray, the keyword input, and the tab bar.
   // Clicks inside the tab bar are excluded so switching tabs swaps the tray without closing it.
@@ -2499,6 +2588,42 @@ export default function Home() {
     }
   };
 
+  const updateJobSeniority = async (statusKey: string, seniority: string | null) => {
+    try {
+      const response = await fetch("/api/job-seniorities", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ statusKey, seniority }),
+      });
+
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to update job seniority");
+      }
+
+      setSearches((current) =>
+        current.map((search) => ({
+          ...search,
+          results: search.results.map((row) => {
+            const rowKey = String(row["status_key"] ?? "").trim().toLowerCase();
+            if (rowKey !== statusKey) {
+              return row;
+            }
+
+            return {
+              ...row,
+              seniority_label: seniority,
+            };
+          }),
+        }))
+      );
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
   if (loading) {
     return <main className="p-8">Loading dashboard...</main>;
   }
@@ -2747,21 +2872,24 @@ export default function Home() {
 
                 {/* Desktop table view – hidden on mobile */}
                 <div id={`search-results-wrap-${search.slug}`} className="hidden md:flex h-full min-h-0 flex-1 flex-col overflow-hidden px-6 pt-2">
-                  <div className="min-w-[1100px]">
+                  <div className="min-w-0">
                     <Table id={`search-results-table-${search.slug}`} className="table-fixed">
                       <TableHeader id={`search-results-header-${search.slug}`}>
                         <TableRow id={`search-results-header-row-${search.slug}`} className="border-b border-[#17254214]">
                           {VISIBLE_COLUMNS.map((column) => (
                             <TableHead
                               key={column}
-                              className={column === "title" ? "h-10 w-[480px] max-w-[480px] px-2 text-sm font-bold capitalize text-[#18727A]" : column === "company" ? "h-10 w-[240px] max-w-[240px] px-2 text-sm font-bold capitalize text-[#18727A]" : "h-10 px-2 text-sm font-bold capitalize text-[#18727A]"}
+                              className={column === "title" || column === "company" ? "h-10 px-2 text-sm font-bold capitalize text-[#18727A]" : "h-10 w-[120px] max-w-[120px] px-2 text-sm font-bold capitalize text-[#18727A]"}
+                              style={column === "title" ? { width: "70%" } : column === "company" ? { width: "30%" } : undefined}
                             >
                               {column === "date_posted"
                                 ? "Age"
                                 : column === "industry"
                                 ? "Industry"
-                                : column === "salary"
-                                ? "Salary"
+                                : column === "ai_level"
+                                ? "AI Level"
+                                : column === "seniority"
+                                ? "Seniority"
                                 : column === "status"
                                 ? "Status"
                                 : column.replace(/_/g, " ")}
@@ -2773,7 +2901,7 @@ export default function Home() {
                   </div>
 
                   <ScrollArea id={`search-results-body-scroll-${search.slug}`} className="min-h-0 flex-1 w-full overflow-hidden">
-                    <div className="min-w-[1100px]">
+                    <div className="min-w-0">
                       <Table id={`search-results-body-table-${search.slug}`} className="table-fixed">
                         <TableBody id={`search-results-body-${search.slug}`}>
                           {(() => {
@@ -2796,7 +2924,8 @@ export default function Home() {
                                   {VISIBLE_COLUMNS.map((column) => (
                                     <TableCell
                                       key={`${search.slug}-${index}-${column}`}
-                                      className={column === "title" ? "h-[37px] w-[480px] max-w-[480px] px-2 text-sm text-card-foreground" : column === "company" ? "h-[37px] w-[240px] max-w-[240px] px-2 text-sm text-card-foreground" : "h-[37px] px-2 text-sm text-card-foreground"}
+                                      className={column === "title" || column === "company" ? "h-[37px] px-2 text-sm text-card-foreground" : "h-[37px] w-[120px] max-w-[120px] px-2 text-sm text-card-foreground"}
+                                      style={column === "title" ? { width: "70%" } : column === "company" ? { width: "30%" } : undefined}
                                     >
                                       {column === "title" ? (
                                         <JobTitleCell
@@ -2833,8 +2962,22 @@ export default function Home() {
                                             void updateJobIndustry(statusKey, nextIndustry);
                                           }}
                                         />
-                                      ) : column === "salary" ? (
-                                        formatSalary(row)
+                                      ) : column === "ai_level" ? (
+                                        <AiLevelCell description={String(row["description"] ?? "")} />
+                                      ) : column === "seniority" ? (
+                                        <SeniorityCell
+                                          seniority={String(row["seniority_label"] ?? "")}
+                                          onChange={(nextSeniority) => {
+                                            const statusKey = getStatusKey(row);
+
+                                            if (!statusKey) {
+                                              setError("Unable to update seniority for this row.");
+                                              return;
+                                            }
+
+                                            void updateJobSeniority(statusKey, nextSeniority);
+                                          }}
+                                        />
                                       ) : column === "status" ? (
                                         <JobStatusCell
                                           status={toJobStatus(row["job_status"])}

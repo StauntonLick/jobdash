@@ -311,6 +311,21 @@ def apply_linkedin_pagination_patch() -> None:
             if fallback_date is not None:
                 job_post.date_posted = fallback_date
 
+        # LinkedIn job cards include a structured workplace-type badge
+        # (job-search-card__workplace-type) that is more reliable than the
+        # keyword heuristic used by is_job_remote(). Override is_remote and
+        # populate work_from_home_type from this badge when it is present.
+        workplace_tag = job_card.find("span", class_="job-search-card__workplace-type")
+        if workplace_tag:
+            workplace_text = workplace_tag.get_text(strip=True).lower()
+            if "remote" in workplace_text:
+                job_post.is_remote = True
+                job_post.work_from_home_type = "Remote"
+            elif "hybrid" in workplace_text:
+                job_post.work_from_home_type = "Hybrid"
+            elif "on-site" in workplace_text or "onsite" in workplace_text:
+                job_post.work_from_home_type = "On-site"
+
         return job_post
 
     LinkedIn._process_job = _patched_process_job  # type: ignore[assignment]

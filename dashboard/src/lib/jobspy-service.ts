@@ -4,6 +4,8 @@ import { spawn } from "node:child_process";
 
 import type { SearchDefinition } from "@/lib/search-config";
 import { INDUSTRY_LABELS } from "@/lib/industry-labels";
+import { SENIORITY_LABELS } from "@/lib/seniority-labels";
+import type { SeniorityLabel } from "@/lib/seniority-labels";
 
 export type SearchResult = {
   slug: string;
@@ -34,6 +36,7 @@ const CACHE_DIR = path.join(CACHE_BASE, "searches");
 const ARCHIVE_DIR = path.join(CACHE_BASE, "searches-archive");
 const STATUS_STORE_PATH = path.join(CACHE_BASE, "job-statuses.json");
 const INDUSTRY_OVERRIDE_STORE_PATH = path.join(CACHE_BASE, "job-industry-overrides.json");
+const SENIORITY_OVERRIDE_STORE_PATH = path.join(CACHE_BASE, "job-seniority-overrides.json");
 const SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "run_jobspy_search.py");
 const DESCRIPTION_FETCH_SCRIPT_PATH = path.resolve(process.cwd(), "scripts", "fetch_job_description.py");
 const DESCRIPTION_CACHE_PATH = path.join(CACHE_BASE, "job-descriptions.json");
@@ -92,6 +95,7 @@ const INDUSTRY_RULES: Array<{ label: string; keywords: string[] }> = [
 ];
 
 export { INDUSTRY_LABELS };
+export { SENIORITY_LABELS };
 
 const INDUSTRY_SCORE_WEIGHTS = {
   companyIndustry: 6,
@@ -102,6 +106,33 @@ const INDUSTRY_SCORE_WEIGHTS = {
 
 const MIN_INDUSTRY_SCORE = 3;
 const MIN_INDUSTRY_MARGIN = 2;
+
+const SENIORITY_RULES: Array<{ label: SeniorityLabel; keywords: string[] }> = [
+  { label: "Intern",    keywords: ["intern", "internship"] },
+  { label: "Junior",    keywords: ["junior", "jnr", "associate"] },
+  { label: "Mid",       keywords: ["mid", "mid-weight"] },
+  { label: "Senior",    keywords: ["senior", "snr"] },
+  { label: "Principal", keywords: ["principal"] },
+  { label: "Lead",      keywords: ["lead"] },
+  { label: "Manager",   keywords: ["director", "head of", "manager"] },
+];
+
+// Sentences containing these phrases are stripped from the description before
+// seniority keyword matching, to avoid picking up team-structure descriptions
+// like "reporting to a Senior Manager" or "working with Junior developers".
+const SENIORITY_CONTEXT_EXCLUSION_PHRASES = [
+  "reporting to",
+  "reports to",
+  "report to",
+  "working with",
+  "working alongside",
+  "managed by",
+  "you will work with",
+  "you'll work with",
+  "partnering with",
+  "collaborating with",
+  "works with",
+];
 
 const BENEFITS_SECTION_HINTS = [
   "benefits",
@@ -216,6 +247,46 @@ export async function saveIndustryOverride(statusKey: string, industry: string |
   }
   
   await writeIndustryOverrideStore(currentOverrides);
+}
+
+function isValidSeniorityLabel(value: unknown): value is SeniorityLabel {
+  const normalized = String(value ?? "").trim();
+  return SENIORITY_LABELS.includes(normalized as SeniorityLabel);
+}
+
+async function readSeniorityOverrideStore(): Promise<Record<string, string>> {
+  try {
+    const content = await fs.readFile(SENIORITY_OVERRIDE_STORE_PATH, "utf8");
+    return JSON.parse(content) as Record<string, string>;
+  } catch {
+    return {};
+  }
+}
+
+async function writeSeniorityOverrideStore(overrides: Record<string, string>): Promise<void> {
+  await ensureCacheDir();
+  await fs.writeFile(SENIORITY_OVERRIDE_STORE_PATH, JSON.stringify(overrides, null, 2), "utf8");
+}
+
+export async function saveSeniorityOverride(statusKey: string, seniority: string | null): Promise<void> {
+  const normalizedKey = normalizeText(statusKey);
+  if (!normalizedKey) {
+    throw new Error("Invalid status key.");
+  }
+
+  if (seniority !== null && !isValidSeniorityLabel(seniority)) {
+    throw new Error("Invalid seniority label.");
+  }
+
+  const currentOverrides = await readSeniorityOverrideStore();
+
+  if (seniority === null) {
+    delete currentOverrides[normalizedKey];
+  } else {
+    currentOverrides[normalizedKey] = seniority;
+  }
+
+  await writeSeniorityOverrideStore(currentOverrides);
 }
 
 async function canAccessPath(filePath: string): Promise<boolean> {
@@ -358,8 +429,9 @@ async function readDescriptionCache(): Promise<Record<string, string>> {
     descriptionCache = normalized;
     return normalized;
   } catch {
-    descriptionCache = {};
-    return descriptionCache;
+    // Don't cache a failed read — leave descriptionCache as null so the next
+    // request retries the file, e.g. if the file was copied in after startup.
+    return {};
   }
 }
 
@@ -501,19 +573,22 @@ async function hydrateDescriptionsFromCache(
   let didChange = false;
 
   const hydrated = results.map((row) => {
-    const existingDescription = String(row.description ?? "").trim();
-    if (existingDescription) {
-      return row;
-    }
-
     const link = extractPrimaryJobLink(row);
     if (!link) {
       return row;
     }
 
+    // Prefer the cached (full) description over whatever the scraper provided,
+    // since the scraper version is often truncated. Only fall back to the
+    // scraper description if the cache has nothing for this URL.
     const key = buildDescriptionCacheKey(link.site, link.url);
     const cachedDescription = String(cache[key] ?? "").trim();
     if (!cachedDescription) {
+      return row;
+    }
+
+    const existingDescription = String(row.description ?? "").trim();
+    if (existingDescription === cachedDescription) {
       return row;
     }
 
@@ -553,6 +628,20 @@ export async function getJobDescription(site: string, url: string): Promise<stri
   }
 
   return await fetchAndCacheDescription(normalizedSite, normalizedUrl);
+}
+
+export async function getCachedDescriptionsBatch(
+  jobs: Array<{ site: string; url: string }>
+): Promise<Record<string, string>> {
+  const cache = await readDescriptionCache();
+  const result: Record<string, string> = {};
+  for (const { site, url } of jobs) {
+    const key = buildDescriptionCacheKey(site, url);
+    if (cache[key]) {
+      result[key] = cache[key];
+    }
+  }
+  return result;
 }
 
 function getCachePath(slug: string): string {
@@ -833,8 +922,9 @@ function splitActiveAndArchivedResults(results: Array<Record<string, unknown>>):
   const archived: Array<Record<string, unknown>> = [];
 
   for (const row of results) {
-    const postedDate = parseDatePosted(row.date_posted);
-    if (!postedDate || postedDate.getTime() < cutoffMs) {
+    const effectiveDate =
+      parseDatePosted(row.date_posted) ?? parseDatePosted(row.first_seen_at);
+    if (!effectiveDate || effectiveDate.getTime() < cutoffMs) {
       archived.push(row);
       continue;
     }
@@ -1095,11 +1185,123 @@ function inferIndustryLabel(row: Record<string, unknown>): string {
   return top.label;
 }
 
+// Returns the upper bound of a years-of-experience mention in the text.
+// Handles ranges ("3-5 years"), single values ("5 years"), and "5+ years".
+// Returns the maximum value found across all mentions, or undefined if none.
+function extractMaxExperienceYears(text: string): number | undefined {
+  // Descriptions are stored as markdown; strip backslash escapes (e.g. "3\+" → "3+",
+  // "3\-5" → "3-5") so the patterns below match correctly.
+  const cleaned = text.replace(/\\(.)/g, "$1");
+
+  const rangePattern = /(\d+)\s*[-–]\s*(\d+)\s*\+?\s*years?/gi;
+  // Allow up to 3 words between "years [of]" and "experience" so phrases like
+  // "3+ years of product design experience" are caught alongside the plain form.
+  const singlePattern = /(\d+)\s*\+?\s*years?(?:\s+of)?\s+(?:\w+\s+){0,3}experience/gi;
+  // Catches "X years [gerund]" — e.g. "4+ years designing production software",
+  // "5 years working in finance" — where "experience" is not explicitly stated.
+  const gerundPattern = /(\d+)\s*\+?\s*years?\s+(?:of\s+)?\w+ing\b/gi;
+
+  let maxYears: number | undefined;
+
+  for (const match of cleaned.matchAll(rangePattern)) {
+    const upper = Math.max(Number(match[1]), Number(match[2]));
+    if (!maxYears || upper > maxYears) maxYears = upper;
+  }
+
+  for (const match of cleaned.matchAll(singlePattern)) {
+    const value = Number(match[1]);
+    if (!maxYears || value > maxYears) maxYears = value;
+  }
+
+  for (const match of cleaned.matchAll(gerundPattern)) {
+    const value = Number(match[1]);
+    if (!maxYears || value > maxYears) maxYears = value;
+  }
+
+  return maxYears;
+}
+
+// Returns the label with the strictly highest count, or "" if all are zero or
+// the top two are tied (ambiguous).
+function highestUniqueCount(counts: Record<SeniorityLabel, number>): string {
+  const sorted = (Object.entries(counts) as Array<[SeniorityLabel, number]>)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  if (sorted.length === 0) return "";
+  const topCount = sorted[0][1];
+  const secondCount = sorted[1]?.[1] ?? 0;
+  return topCount > secondCount ? sorted[0][0] : "";
+}
+
+function inferSeniorityLabel(row: Record<string, unknown>): string {
+  const title = normalizeText(row.title);
+  const descriptionRaw = String(row.description ?? "");
+
+  // Step 1: title keyword match is decisive — if the title contains a seniority
+  // keyword, use the level with the highest hit count and skip the description.
+  const titleCounts: Record<SeniorityLabel, number> = {
+    Intern: 0, Junior: 0, Mid: 0, Senior: 0, Principal: 0, Lead: 0, Manager: 0,
+  };
+  for (const rule of SENIORITY_RULES) {
+    for (const keyword of rule.keywords) {
+      titleCounts[rule.label] += countWholeKeywordMentions(title, keyword);
+    }
+  }
+  const titleWinner = highestUniqueCount(titleCounts);
+  if (titleWinner) return titleWinner;
+
+  // Step 2: no title signal — check description keywords and years of experience.
+  // Strip sentences containing context phrases (e.g. "reporting to a Senior Manager")
+  // so team-structure descriptions don't pollute the signal.
+  const filteredDescription = normalizeText(
+    descriptionRaw
+      .split(/[.!?\n]+/)
+      .filter((sentence) => {
+        const normalized = normalizeText(sentence);
+        return !SENIORITY_CONTEXT_EXCLUSION_PHRASES.some((phrase) => normalized.includes(phrase));
+      })
+      .join(" ")
+  );
+
+  const descCounts: Record<SeniorityLabel, number> = {
+    Intern: 0, Junior: 0, Mid: 0, Senior: 0, Principal: 0, Lead: 0, Manager: 0,
+  };
+  for (const rule of SENIORITY_RULES) {
+    // "Lead" is too ambiguous in job descriptions (e.g. "lead the team") so we
+    // skip keyword matching for it here — only the years-of-experience signal
+    // can contribute to Lead in the description path.
+    if (rule.label === "Lead") continue;
+    for (const keyword of rule.keywords) {
+      descCounts[rule.label] += countWholeKeywordMentions(filteredDescription, keyword);
+    }
+  }
+
+  // Years of experience counts as one signal for the matching level.
+  const maxYears = extractMaxExperienceYears(descriptionRaw);
+  if (maxYears !== undefined) {
+    if (maxYears < 2) {
+      descCounts.Junior += 1;
+    } else if (maxYears <= 5) {
+      descCounts.Mid += 1;
+    } else if (maxYears <= 8) {
+      descCounts.Senior += 1;
+    } else {
+      // >8 years boosts both Principal and Lead equally; other keyword signals break the tie.
+      descCounts.Principal += 1;
+      descCounts.Lead += 1;
+    }
+  }
+
+  return highestUniqueCount(descCounts);
+}
+
 function annotateDerivedFields(results: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
   return results.map((row) => ({
     ...row,
     status_key: buildStatusKey(row),
     industry_label: inferIndustryLabel(row),
+    seniority_label: inferSeniorityLabel(row),
   }));
 }
 
@@ -1130,6 +1332,21 @@ function applyStoredIndustryOverrides(
     return {
       ...row,
       industry_label: storedOverride ?? row.industry_label,
+    };
+  });
+}
+
+function applyStoredSeniorityOverrides(
+  results: Array<Record<string, unknown>>,
+  overrides: Record<string, string>
+): Array<Record<string, unknown>> {
+  return results.map((row) => {
+    const statusKey = String(row.status_key ?? buildStatusKey(row));
+    const storedOverride = overrides[statusKey];
+
+    return {
+      ...row,
+      seniority_label: storedOverride ?? row.seniority_label,
     };
   });
 }
@@ -1176,7 +1393,9 @@ async function presentSearchResult(
   const resultsWithStatus = applyStoredStatuses(dedupedResults, statuses);
   const industryOverrides = await readIndustryOverrideStore();
   const resultsWithIndustry = applyStoredIndustryOverrides(resultsWithStatus, industryOverrides);
-  enqueueDescriptionFetches(resultsWithIndustry);
+  const seniorityOverrides = await readSeniorityOverrideStore();
+  const resultsWithSeniority = applyStoredSeniorityOverrides(resultsWithIndustry, seniorityOverrides);
+  enqueueDescriptionFetches(resultsWithSeniority);
 
   const debug: SearchDebugStats | undefined = includeDebug
     ? {
@@ -1184,7 +1403,7 @@ async function presentSearchResult(
         remoteFilteredCount: remoteFilteredResults.length,
         titleFilteredCount: remoteFilteredResults.length,
         dedupedCount: dedupedResults.length,
-        finalCount: resultsWithIndustry.length,
+        finalCount: resultsWithSeniority.length,
         excludedByRemoteFilter: rawResults.length - remoteFilteredResults.length,
         excludedByTitleFilter: 0,
         removedByDedupe: enrichedResults.length - dedupedResults.length,
@@ -1201,8 +1420,8 @@ async function presentSearchResult(
   return {
     ...payload,
     rawResultCount,
-    results: resultsWithIndustry,
-    resultCount: resultsWithIndustry.length,
+    results: resultsWithSeniority,
+    resultCount: resultsWithSeniority.length,
     ...(debug ? { debug } : {}),
   };
 }

@@ -1,5 +1,14 @@
 # JobDash History
 #
+## 2026-06-11
+
+- Added **Seniority column** to the job results table, replacing the Salary column:
+  - New `dashboard/src/lib/seniority-labels.ts` — exports `SENIORITY_LABELS` constant (7 levels: Intern, Junior, Mid, Senior, Principal, Lead, Manager).
+  - `dashboard/src/lib/jobspy-service.ts` — added `inferSeniorityLabel()` using keyword scoring (title ×5, description ×1) plus years-of-experience detection (`<2 yrs → Junior`, `3–5 → Mid`, `5–8 → Senior`, `>8 → boosts both Principal and Lead`). Context exclusion strips sentences containing phrases like "reporting to", "working with" before keyword matching. Added `saveSeniorityOverride()` and supporting storage functions (cache file: `.cache/job-seniority-overrides.json`). `annotateDerivedFields()` now sets `seniority_label`; `presentSearchResult()` applies stored seniority overrides.
+  - New `dashboard/src/app/api/job-seniorities/route.ts` — POST endpoint for persisting user overrides.
+  - `dashboard/src/app/page.tsx` — replaced `"salary"` with `"seniority"` in `VISIBLE_COLUMNS`, added `SeniorityCell` dropdown component and `updateJobSeniority()` handler, removed unused salary formatting functions.
+  - New `dashboard/tests/e2e/seniority-column.spec.ts` — 4 E2E tests covering header, cell rendering, dropdown contents, and API update flow. Updated `helpers.ts` to stub `/api/job-seniorities` and add `seniority_label` to mock job row. Updated `search-execution.spec.ts` to expect "Seniority" header instead of "Salary". All 47 tests pass.
+
 ## 2026-06-04 (2)
 
 - Updated **search results filter controls** in `dashboard/src/app/page.tsx` to match revised Figma design (node 273-5483 / mini button spec 270-5164):

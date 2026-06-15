@@ -12,3 +12,4 @@
 ## Tweaks
 - [Done] The includes/excludes/blacklist filters currently filter the table as the user types, which causes UI slowdown. Only apply the filter when you have detected the user has finished typing (i.e. a certain number of ms after the last keystroke)
 - [Done] When the user clicks the search button, swap the search icon out for a rotating progress icon while the search is underway.
+- [ToDo] Figure out approach for dealing with flaky searches so that fresh runs are the same as long-running caches

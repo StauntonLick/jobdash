@@ -168,7 +168,7 @@ test.describe("Search execution", () => {
     await expect(header).toContainText("title");
     await expect(header).toContainText("company");
     await expect(header).toContainText("Industry");
-    await expect(header).toContainText("Salary");
+    await expect(header).toContainText("Seniority");
     await expect(header).toContainText("Age");
     await expect(header).toContainText("Status");
   });

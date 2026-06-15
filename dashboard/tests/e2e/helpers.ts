@@ -67,6 +67,7 @@ export const MOCK_JOB_ROW = {
   currency: "GBP",
   job_url: "https://example.com/job/1",
   industry_label: "Tech",
+  seniority_label: "Senior",
 };
 
 /** A search that returned one job — tests table rendering. */
@@ -149,6 +150,11 @@ export async function mockAPIs(page: Page, opts: MockOptions = {}) {
   // /api/job-industries — stub
   await page.route("/api/job-industries", async (route) => {
     await route.fulfill({ json: { ok: true } });
+  });
+
+  // /api/job-seniorities — stub
+  await page.route("/api/job-seniorities", async (route) => {
+    await route.fulfill({ json: { success: true } });
   });
 }
 
